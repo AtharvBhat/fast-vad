@@ -8,7 +8,7 @@ pub const FFT_BINS: usize = FRAME_SIZE / 2 + 1;
 pub const NUM_BANDS: usize = 8;
 
 // The VAD operates on 512-sample frames, which corresponds to 32ms at an 16kHz sample rate.
-pub const BAND_BINS: [(usize, usize); NUM_BANDS] = [
+pub static BAND_BINS: [(usize, usize); NUM_BANDS] = [
     (3, 6),
     (6, 12),
     (12, 19),
@@ -20,7 +20,7 @@ pub const BAND_BINS: [(usize, usize); NUM_BANDS] = [
 ];
 
 // Precomputed Hann window values for a 512-sample frame.
-pub const HANN_512: [f32; FRAME_SIZE] = [
+pub static HANN_512: [f32; FRAME_SIZE] = [
     0.0,
     3.779_657_7e-5,
     0.000_151_180_59,
