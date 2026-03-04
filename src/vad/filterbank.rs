@@ -41,7 +41,7 @@ impl FilterBank {
                     simd::apply_hanning_window_simd(window);
                     self.fft_planner
                         .process_with_scratch(window, output, scratch)
-                        .unwrap();
+                        .expect("FFT processing failed in FilterBank::compute_filterbank");
                     simd::compute_band_energies_simd(output)
                 },
             )
