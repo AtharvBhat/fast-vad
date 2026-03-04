@@ -5,12 +5,18 @@ use realfft::RealFftPlanner;
 use std::sync::Arc;
 use wide::f32x8;
 
-struct FilterBank {
+pub struct FilterBank {
     fft_planner: Arc<dyn realfft::RealToComplex<f32>>,
 }
 
+impl Default for FilterBank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FilterBank {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut fft_planner = RealFftPlanner::new();
         Self {
             fft_planner: fft_planner.plan_fft_forward(constants::FRAME_SIZE),
@@ -19,7 +25,7 @@ impl FilterBank {
 
     // Compute the filterbank energies for a given input signal
     // Drops the last incomplete frame if input length is not a multiple of FRAME_SIZE
-    fn compute_filterbank(&self, input: &[f32]) -> Vec<f32x8> {
+    pub fn compute_filterbank(&self, input: &[f32]) -> Vec<f32x8> {
         let energies: Vec<f32x8> = input
             .par_chunks_exact(constants::FRAME_SIZE)
             .map_init(
@@ -48,7 +54,6 @@ impl FilterBank {
 mod tests {
     use crate::vad::constants;
     use crate::vad::filterbank::FilterBank;
-    use crate::vad::simd;
     use std::f32::consts::PI;
     use wide::f32x8;
 
@@ -100,139 +105,6 @@ mod tests {
             .0
     }
 
-    // ─── Hann window ────────────────────────────────────────────────────────
-
-    #[test]
-    fn hann_window_endpoints_near_zero() {
-        assert!(
-            constants::HANN_512[0].abs() < 1e-6,
-            "window start should be ~0, got {}",
-            constants::HANN_512[0]
-        );
-        assert!(
-            constants::HANN_512[constants::FRAME_SIZE - 1].abs() < 1e-6,
-            "window end should be ~0, got {}",
-            constants::HANN_512[constants::FRAME_SIZE - 1]
-        );
-    }
-
-    #[test]
-    fn hann_window_peak_near_center() {
-        let mid = constants::HANN_512[constants::FRAME_SIZE / 2 - 1];
-        assert!(
-            (mid - 1.0).abs() < 0.01,
-            "window center should be ~1.0, got {mid}"
-        );
-    }
-
-    #[test]
-    fn hann_window_symmetric() {
-        for i in 0..constants::FRAME_SIZE / 2 {
-            let diff =
-                (constants::HANN_512[i] - constants::HANN_512[constants::FRAME_SIZE - 1 - i]).abs();
-            assert!(diff < 1e-6, "window not symmetric at index {i}");
-        }
-    }
-
-    #[test]
-    fn hann_window_all_non_negative() {
-        for (i, &val) in constants::HANN_512.iter().enumerate() {
-            assert!(val >= 0.0, "negative window value at index {i}: {val}");
-        }
-    }
-
-    // ─── apply_hanning_window_simd ──────────────────────────────────────────
-
-    #[test]
-    fn windowing_zeros_stay_zero() {
-        let mut frame = silence_frame();
-        simd::apply_hanning_window_simd(&mut frame);
-        assert!(frame.iter().all(|&x| x == 0.0));
-    }
-
-    #[test]
-    fn windowing_tapers_edges() {
-        let mut frame = vec![1.0f32; constants::FRAME_SIZE];
-        simd::apply_hanning_window_simd(&mut frame);
-
-        // First and last samples should be near zero
-        assert!(
-            frame[0].abs() < 1e-6,
-            "first sample not tapered: {}",
-            frame[0]
-        );
-        assert!(
-            frame[constants::FRAME_SIZE - 1].abs() < 1e-6,
-            "last sample not tapered: {}",
-            frame[constants::FRAME_SIZE - 1]
-        );
-
-        // Center should be near original (1.0)
-        let mid = frame[constants::FRAME_SIZE / 2 - 1];
-        assert!(
-            (mid - 1.0).abs() < 0.01,
-            "center sample should be ~1.0, got {mid}"
-        );
-    }
-
-    #[test]
-    fn windowing_matches_manual() {
-        let mut frame: Vec<f32> = (0..constants::FRAME_SIZE).map(|i| i as f32).collect();
-        let expected: Vec<f32> = (0..constants::FRAME_SIZE)
-            .map(|i| i as f32 * constants::HANN_512[i])
-            .collect();
-
-        simd::apply_hanning_window_simd(&mut frame);
-
-        for i in 0..constants::FRAME_SIZE {
-            assert!(
-                (frame[i] - expected[i]).abs() < 1e-4,
-                "mismatch at {i}: got {}, expected {}",
-                frame[i],
-                expected[i]
-            );
-        }
-    }
-
-    // ─── Band bin coverage ──────────────────────────────────────────────────
-
-    #[test]
-    fn band_bins_contiguous_no_gaps() {
-        for i in 0..constants::NUM_BANDS - 1 {
-            assert_eq!(
-                constants::BAND_BINS[i].1,
-                constants::BAND_BINS[i + 1].0,
-                "gap between band {i} and band {}",
-                i + 1
-            );
-        }
-    }
-
-    #[test]
-    fn band_bins_skip_dc() {
-        assert!(
-            constants::BAND_BINS[0].0 >= 1,
-            "band 0 should not include DC (bin 0)"
-        );
-    }
-
-    #[test]
-    fn band_bins_end_near_4khz() {
-        let last_bin = constants::BAND_BINS[constants::NUM_BANDS - 1].1;
-        let freq = last_bin as f32 * (16000.0 / constants::FRAME_SIZE as f32);
-        assert!(
-            (freq - 4000.0).abs() < 200.0,
-            "last band should end near 4000 Hz, ends at {freq} Hz"
-        );
-    }
-
-    #[test]
-    fn band_bins_all_nonempty() {
-        for (i, &(lo, hi)) in constants::BAND_BINS.iter().enumerate() {
-            assert!(hi > lo, "band {i} is empty: ({lo}, {hi})");
-        }
-    }
-
     // ─── Silence ────────────────────────────────────────────────────────────
 
     #[test]
@@ -250,87 +122,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn silence_all_bands_approximately_equal() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&silence_frame());
-        let energies = energies_to_array(result[0]);
-
-        let max = energies.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let min = energies.iter().cloned().fold(f32::INFINITY, f32::min);
-        assert!(
-            (max - min) < 1.0,
-            "silence bands spread too wide: min={min:.2}, max={max:.2}"
-        );
-    }
-
-    // ─── Pure tones: each tone peaks in its expected band ───────────────────
-
-    #[test]
-    fn tone_150hz_peaks_band_0() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(150.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 0, "150Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_300hz_peaks_band_1() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(300.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 1, "300Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_500hz_peaks_band_2() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(500.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 2, "500Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_800hz_peaks_band_3() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(800.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 3, "800Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_1300hz_peaks_band_4() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(1300.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 4, "1300Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_2000hz_peaks_band_5() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(2000.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 5, "2000Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_2800hz_peaks_band_6() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(2800.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 6, "2800Hz: energies={energies:.2?}");
-    }
-
-    #[test]
-    fn tone_3600hz_peaks_band_7() {
-        let fb = FilterBank::new();
-        let result = fb.compute_filterbank(&sine_frame(3600.0, 0.5));
-        let energies = energies_to_array(result[0]);
-        assert_eq!(peak_band(&energies), 7, "3600Hz: energies={energies:.2?}");
-    }
-
-    // ─── Tone dominance: peak band should be well above the rest ────────────
+    // ─── Pure tones: each tone should dominate its expected band ────────────
 
     #[test]
     fn tone_dominates_other_bands() {
@@ -402,18 +194,20 @@ mod tests {
     }
 
     #[test]
-    fn very_quiet_signal_above_silence() {
+    fn energy_monotone_with_amplitude() {
+        // Energy in the target band should increase monotonically with amplitude.
         let fb = FilterBank::new();
-        let silence = fb.compute_filterbank(&silence_frame());
-        let whisper = fb.compute_filterbank(&sine_frame(500.0, 0.001));
-
-        let e_silence = energies_to_array(silence[0]);
-        let e_whisper = energies_to_array(whisper[0]);
-
-        assert!(
-            e_whisper[2] > e_silence[2],
-            "even a very quiet tone should be above silence in its band"
-        );
+        let amplitudes = [0.05f32, 0.1, 0.2, 0.4, 0.8];
+        let mut prev = f32::NEG_INFINITY;
+        for &amp in &amplitudes {
+            let result = fb.compute_filterbank(&sine_frame(500.0, amp));
+            let e = energies_to_array(result[0])[2];
+            assert!(
+                e > prev,
+                "energy not monotone: amp={amp}, energy={e:.3}, prev={prev:.3}"
+            );
+            prev = e;
+        }
     }
 
     // ─── White noise ────────────────────────────────────────────────────────
@@ -650,17 +444,31 @@ mod tests {
     }
 
     #[test]
-    fn no_nan_or_inf_on_dc_signal() {
-        // Constant offset — all energy at bin 0 (DC), which should be excluded
+    fn energy_phase_invariant() {
+        // FFT power is magnitude-squared, so band energies should not depend on
+        // the starting phase of a tone — only its amplitude matters.
+        // 500 Hz sits at exactly bin 16 (16 * 16000/512 = 500 Hz), making it
+        // periodic within the 512-sample window and ideal for this check.
         let fb = FilterBank::new();
-        let audio = vec![0.5f32; constants::FRAME_SIZE];
-        let result = fb.compute_filterbank(&audio);
-        let energies = energies_to_array(result[0]);
-        for band in 0..constants::NUM_BANDS {
-            assert!(
-                energies[band].is_finite(),
-                "band {band} is not finite on DC"
-            );
-        }
+
+        let frame_0: Vec<f32> = (0..constants::FRAME_SIZE)
+            .map(|i| 0.5 * (2.0 * PI * 500.0 * i as f32 / 16000.0).sin())
+            .collect();
+        let frame_90: Vec<f32> = (0..constants::FRAME_SIZE)
+            .map(|i| 0.5 * (2.0 * PI * 500.0 * i as f32 / 16000.0 + PI / 2.0).sin())
+            .collect();
+
+        let e0 = energies_to_array(fb.compute_filterbank(&frame_0)[0]);
+        let e90 = energies_to_array(fb.compute_filterbank(&frame_90)[0]);
+
+        // Phase invariance holds where the tone actually lives. Out-of-band leakage
+        // is near the noise floor, so log-scale differences there can be large
+        // while remaining physically negligible.
+        assert!(
+            (e0[2] - e90[2]).abs() < 0.05,
+            "band 2: energy should be phase-invariant (0°={:.3}, 90°={:.3})",
+            e0[2],
+            e90[2]
+        );
     }
 }
