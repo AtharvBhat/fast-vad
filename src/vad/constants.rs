@@ -4,6 +4,11 @@
 pub const FRAME_SIZE: usize = 512;
 pub const FFT_BINS: usize = FRAME_SIZE / 2 + 1;
 
+// Number of FFT bins used for analysis. BAND_BINS covers [0, ANALYSIS_BINS),
+// which spans 0–4 kHz at 16 kHz sample rate. The Nyquist bin and everything
+// above it are intentionally excluded.
+pub const ANALYSIS_BINS: usize = FFT_BINS / 2; // 128 for FRAME_SIZE=512
+
 // 8 total frequency bands
 pub const NUM_BANDS: usize = 8;
 

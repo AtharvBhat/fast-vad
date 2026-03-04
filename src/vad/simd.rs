@@ -4,7 +4,8 @@ use realfft::num_complex::Complex32;
 use wide::{f32x8, f32x16};
 
 // Apply Hanning window using SIMD in place
-pub fn apply_hanning_window_simd(frame: &mut [f32]) -> &[f32] {
+pub fn apply_hanning_window_simd(frame: &mut [f32]) {
+    debug_assert_eq!(frame.len(), constants::FRAME_SIZE);
     let hanning = constants::HANN_512;
     let simd_width = 16;
 
@@ -15,17 +16,18 @@ pub fn apply_hanning_window_simd(frame: &mut [f32]) -> &[f32] {
         let windowed_chunk = frame_chunk * hanning_chunk;
         frame[i * simd_width..(i + 1) * simd_width].copy_from_slice(&windowed_chunk.to_array());
     });
-    frame
 }
 
 // Compute Band energies using SIMD for the power calculation
 pub fn compute_band_energies_simd(spectrum: &[Complex32]) -> f32x8 {
-    let mut reals = [0.0f32; constants::FFT_BINS / 2];
-    let mut imags = [0.0f32; constants::FFT_BINS / 2];
+    debug_assert!(spectrum.len() >= constants::ANALYSIS_BINS);
+
+    let mut reals = [0.0f32; constants::ANALYSIS_BINS];
+    let mut imags = [0.0f32; constants::ANALYSIS_BINS];
 
     spectrum
         .iter()
-        .take(constants::FFT_BINS / 2)
+        .take(constants::ANALYSIS_BINS)
         .enumerate()
         .for_each(|(i, c)| {
             reals[i] = c.re;
@@ -34,8 +36,8 @@ pub fn compute_band_energies_simd(spectrum: &[Complex32]) -> f32x8 {
 
     // Handle bulk of the data with SIMD
     let simd_width = 16; // Using f32x16 for SIMD processing
-    let mut power = [0.0f32; constants::FFT_BINS / 2];
-    (0..constants::FFT_BINS / 2 / simd_width).for_each(|i| {
+    let mut power = [0.0f32; constants::ANALYSIS_BINS];
+    (0..constants::ANALYSIS_BINS / simd_width).for_each(|i| {
         let re = f32x16::from(&reals[i * simd_width..(i + 1) * simd_width]);
         let im = f32x16::from(&imags[i * simd_width..(i + 1) * simd_width]);
         let p = re * re + im * im;
@@ -43,7 +45,7 @@ pub fn compute_band_energies_simd(spectrum: &[Complex32]) -> f32x8 {
     });
 
     // Handle tail elements that don't fit into a full SIMD register
-    (constants::FFT_BINS / 2 / simd_width * simd_width..constants::FFT_BINS / 2).for_each(|i| {
+    (constants::ANALYSIS_BINS / simd_width * simd_width..constants::ANALYSIS_BINS).for_each(|i| {
         power[i] = reals[i] * reals[i] + imags[i] * imags[i];
     });
 
@@ -53,8 +55,8 @@ pub fn compute_band_energies_simd(spectrum: &[Complex32]) -> f32x8 {
     constants::BAND_BINS
         .iter()
         .enumerate()
-        .for_each(|(band_idx, &bin_range)| {
-            let sum = power[bin_range.0..bin_range.1].iter().sum::<f32>();
+        .for_each(|(band_idx, &(lo, hi))| {
+            let sum = power[lo..hi].iter().sum::<f32>();
             band_energies[band_idx] = (sum + 1e-10).ln();
         });
     f32x8::from(band_energies)
