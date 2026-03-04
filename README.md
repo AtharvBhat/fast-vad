@@ -1,5 +1,5 @@
 # fast-vad
-Port of WebRTC VAD to rust with python bindings
+Extremely fast VAD in Rust with Python bindings.
 
 ## License
 

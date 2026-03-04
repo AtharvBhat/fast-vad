@@ -5,5 +5,14 @@ edition = "2024"
 
 [dependencies]
 numpy = "0.28.0"
+pyo3 = { version = "0.28.2", features= ["extension-module"]}
 rayon = "1.11.0"
 realfft = "3.5.0"
+wide = "1.1.1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "filterbank_bench"
+harness = false
