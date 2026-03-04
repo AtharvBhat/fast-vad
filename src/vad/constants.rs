@@ -12,7 +12,7 @@ pub const ANALYSIS_BINS: usize = FFT_BINS / 2; // 128 for FRAME_SIZE=512
 // 8 total frequency bands
 pub const NUM_BANDS: usize = 8;
 
-// The VAD operates on 512-sample frames, which corresponds to 32ms at an 16kHz sample rate.
+// The VAD operates on 512-sample frames, which corresponds to 32 ms at a 16 kHz sample rate.
 pub static BAND_BINS: [(usize, usize); NUM_BANDS] = [
     (3, 6),
     (6, 12),
