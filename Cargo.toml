@@ -3,7 +3,12 @@ name = "fast-vad"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "fast_vad"
+crate-type = ["cdylib", "lib"]
+
 [dependencies]
+ndarray = "0.17.2"
 numpy = "0.28.0"
 pyo3 = { version = "0.28.2", features= ["extension-module"]}
 rayon = "1.11.0"

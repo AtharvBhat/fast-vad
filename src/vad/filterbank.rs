@@ -6,7 +6,7 @@ use std::sync::Arc;
 use wide::f32x8;
 
 pub struct FilterBank {
-    fft_planner: Arc<dyn realfft::RealToComplex<f32>>,
+    fft_forward: Arc<dyn realfft::RealToComplex<f32>>,
 }
 
 impl Default for FilterBank {
@@ -19,7 +19,7 @@ impl FilterBank {
     pub fn new() -> Self {
         let mut fft_planner = RealFftPlanner::new();
         Self {
-            fft_planner: fft_planner.plan_fft_forward(constants::FRAME_SIZE),
+            fft_forward: fft_planner.plan_fft_forward(constants::FRAME_SIZE),
         }
     }
 
@@ -32,14 +32,14 @@ impl FilterBank {
                 || {
                     (
                         vec![0.0f32; constants::FRAME_SIZE],
-                        self.fft_planner.make_output_vec(),
-                        self.fft_planner.make_scratch_vec(),
+                        self.fft_forward.make_output_vec(),
+                        self.fft_forward.make_scratch_vec(),
                     )
                 },
                 |(window, output, scratch), frame| {
                     window.copy_from_slice(frame);
                     simd::apply_hanning_window_simd(window);
-                    self.fft_planner
+                    self.fft_forward
                         .process_with_scratch(window, output, scratch)
                         .expect("FFT processing failed in FilterBank::compute_filterbank");
                     simd::compute_band_energies_simd(output)
