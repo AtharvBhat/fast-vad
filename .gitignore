@@ -1,3 +1,10 @@
 /target
 /notebooks
 .venv
+__pycache__
+*.pyc
+*/__pycache__
+.benchmark
+.claude
+.pytest_cache
+.gitignore
