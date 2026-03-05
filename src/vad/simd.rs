@@ -145,11 +145,11 @@ mod tests {
         let spectrum = zero_spectrum();
         let result = compute_band_energies_simd(&spectrum).to_array();
         let floor = 1e-10f32.ln();
-        for band in 0..constants::NUM_BANDS {
+        for (band, &energy) in result.iter().enumerate() {
             assert!(
-                (result[band] - floor).abs() < 0.01,
+                (energy - floor).abs() < 0.01,
                 "band {band}: expected floor {floor:.3}, got {:.3}",
-                result[band]
+                energy
             );
         }
     }
