@@ -6,7 +6,7 @@ use std::sync::Arc;
 use wide::f32x8;
 
 pub struct FilterBank {
-    fft_planner: Arc<dyn realfft::RealToComplex<f32>>,
+    fft_forward: Arc<dyn realfft::RealToComplex<f32> + Send + Sync>,
 }
 
 impl Default for FilterBank {
@@ -19,7 +19,7 @@ impl FilterBank {
     pub fn new() -> Self {
         let mut fft_planner = RealFftPlanner::new();
         Self {
-            fft_planner: fft_planner.plan_fft_forward(constants::FRAME_SIZE),
+            fft_forward: fft_planner.plan_fft_forward(constants::FRAME_SIZE),
         }
     }
 
@@ -32,14 +32,14 @@ impl FilterBank {
                 || {
                     (
                         vec![0.0f32; constants::FRAME_SIZE],
-                        self.fft_planner.make_output_vec(),
-                        self.fft_planner.make_scratch_vec(),
+                        self.fft_forward.make_output_vec(),
+                        self.fft_forward.make_scratch_vec(),
                     )
                 },
                 |(window, output, scratch), frame| {
                     window.copy_from_slice(frame);
                     simd::apply_hanning_window_simd(window);
-                    self.fft_planner
+                    self.fft_forward
                         .process_with_scratch(window, output, scratch)
                         .expect("FFT processing failed in FilterBank::compute_filterbank");
                     simd::compute_band_energies_simd(output)
@@ -72,8 +72,8 @@ mod tests {
     fn multi_tone_frame(tones: &[(f32, f32)]) -> Vec<f32> {
         let mut frame = vec![0.0f32; constants::FRAME_SIZE];
         for &(freq, amp) in tones {
-            for i in 0..constants::FRAME_SIZE {
-                frame[i] += amp * (2.0 * PI * freq * i as f32 / 16000.0).sin();
+            for (i, sample) in frame.iter_mut().enumerate() {
+                *sample += amp * (2.0 * PI * freq * i as f32 / 16000.0).sin();
             }
         }
         frame
@@ -113,11 +113,11 @@ mod tests {
         let result = fb.compute_filterbank(&silence_frame());
         let energies = energies_to_array(result[0]);
 
-        for band in 0..constants::NUM_BANDS {
+        for (band, &energy) in energies.iter().enumerate() {
             assert!(
-                energies[band] < -20.0,
+                energy < -20.0,
                 "band {band} energy {:.2} too high for silence",
-                energies[band]
+                energy
             );
         }
     }
@@ -218,11 +218,11 @@ mod tests {
         let result = fb.compute_filterbank(&white_noise_frame(0.3, 12345));
         let energies = energies_to_array(result[0]);
 
-        for band in 0..constants::NUM_BANDS {
+        for (band, &energy) in energies.iter().enumerate() {
             assert!(
-                energies[band] > -20.0,
+                energy > -20.0,
                 "band {band} energy {:.2} too low for white noise",
-                energies[band]
+                energy
             );
         }
     }
@@ -412,11 +412,11 @@ mod tests {
         );
 
         // Should still have finite values everywhere
-        for band in 0..constants::NUM_BANDS {
+        for (band, &energy) in energies.iter().enumerate() {
             assert!(
-                energies[band].is_finite(),
+                energy.is_finite(),
                 "band {band} is not finite: {}",
-                energies[band]
+                energy
             );
         }
     }
@@ -428,8 +428,8 @@ mod tests {
         let fb = FilterBank::new();
         let result = fb.compute_filterbank(&silence_frame());
         let energies = energies_to_array(result[0]);
-        for band in 0..constants::NUM_BANDS {
-            assert!(energies[band].is_finite(), "band {band} is not finite");
+        for (band, &energy) in energies.iter().enumerate() {
+            assert!(energy.is_finite(), "band {band} is not finite");
         }
     }
 
@@ -438,8 +438,8 @@ mod tests {
         let fb = FilterBank::new();
         let result = fb.compute_filterbank(&sine_frame(1000.0, 1.0));
         let energies = energies_to_array(result[0]);
-        for band in 0..constants::NUM_BANDS {
-            assert!(energies[band].is_finite(), "band {band} is not finite");
+        for (band, &energy) in energies.iter().enumerate() {
+            assert!(energy.is_finite(), "band {band} is not finite");
         }
     }
 
