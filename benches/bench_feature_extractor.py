@@ -1,13 +1,18 @@
 """
-Python benchmark for FeatureExtractor, mirroring benches/filterbank_bench.rs.
+Criterion-style Python benchmark for FeatureExtractor using pytest-benchmark.
 
-Measures throughput (samples/s and realtime factor) at the same audio durations
-used in the Cargo/Criterion benchmark.
+Mirrors benches/filterbank_bench.rs:
+  - Same audio durations: 100ms → 1hr
+  - Same LCG seed (reproducible input)
+  - Throughput reported in Gelem/s, matching Criterion's Throughput::Elements
+  - Warmup + statistical summary (mean, stddev, min, max, outliers)
+
+Run with:
+    uv run benches/bench_feature_extractor.py
 """
 
-import math
-import timeit
 import numpy as np
+import pytest
 import fast_vad
 
 SAMPLE_RATE = 16_000
@@ -21,12 +26,9 @@ DURATIONS = [
     ("1hr",    57_600_000),
 ]
 
-WARMUP_REPS = 3    # warm up JIT / rayon thread pool
-MEASURE_REPS = 20  # repeats used to estimate mean latency
-
 
 def lcg_noise(n: int, seed: int = 42) -> np.ndarray:
-    """Same LCG as the Rust benchmark for reproducible input."""
+    """Identical LCG to generate_audio() in filterbank_bench.rs."""
     state = np.uint64(seed)
     out = np.empty(n, dtype=np.float32)
     mul = np.uint64(6_364_136_223_846_793_005)
@@ -39,66 +41,72 @@ def lcg_noise(n: int, seed: int = 42) -> np.ndarray:
     return out
 
 
-def format_time(seconds: float) -> str:
-    if seconds < 1e-6:
-        return f"{seconds * 1e9:.2f} ns"
-    elif seconds < 1e-3:
-        return f"{seconds * 1e6:.2f} µs"
-    elif seconds < 1.0:
-        return f"{seconds * 1e3:.2f} ms"
-    return f"{seconds:.3f} s"
+def _make_audio(num_samples: int) -> np.ndarray:
+    # LCG is slow for large arrays; fall back to numpy RNG for > 160k samples
+    if num_samples <= 160_000:
+        return lcg_noise(num_samples)
+    rng = np.random.default_rng(42)
+    return rng.uniform(-1.0, 1.0, num_samples).astype(np.float32)
 
 
-def format_throughput(samples: int, seconds: float) -> str:
-    elem_per_s = samples / seconds
+def _throughput_str(num_samples: int, mean_s: float) -> str:
+    elem_per_s = num_samples / mean_s
     if elem_per_s >= 1e9:
         return f"{elem_per_s / 1e9:.3f} Gelem/s"
-    elif elem_per_s >= 1e6:
+    if elem_per_s >= 1e6:
         return f"{elem_per_s / 1e6:.3f} Melem/s"
     return f"{elem_per_s / 1e3:.3f} Kelem/s"
 
 
-def main():
-    fe = fast_vad.FeatureExtractor()
+@pytest.fixture(scope="session")
+def fe():
+    return fast_vad.FeatureExtractor()
 
-    header = f"{'Duration':<10} {'Samples':>12} {'Mean time':>12} {'Throughput':>14} {'Realtime':>10}"
-    print(header)
-    print("=" * len(header))
 
-    for label, num_samples in DURATIONS:
-        audio_duration_s = num_samples / SAMPLE_RATE
+# ---------------------------------------------------------------------------
+# Dynamically generate one benchmark function per duration, mirroring
+# Criterion's  BenchmarkId::new("extract_features", label)  naming.
+# ---------------------------------------------------------------------------
 
-        # Build input (expensive for large sizes; do it once)
-        if num_samples <= 160_000:
-            audio = lcg_noise(num_samples)
-        else:
-            # For large inputs use numpy random (fast enough, not reproducible
-            # across runs but fine for benchmarking)
-            rng = np.random.default_rng(42)
-            audio = rng.uniform(-1.0, 1.0, num_samples).astype(np.float32)
+def _make_bench(label: str, num_samples: int):
+    audio = _make_audio(num_samples)
+    audio_duration_s = num_samples / SAMPLE_RATE
+    rounds = 5 if num_samples >= 9_600_000 else 20
 
-        def run():
-            fe.extract_features(audio, SAMPLE_RATE)
+    def bench(benchmark, fe):
+        benchmark.extra_info["num_samples"] = num_samples
+        benchmark.extra_info["audio_duration_s"] = audio_duration_s
 
-        # Warm up
-        for _ in range(WARMUP_REPS):
-            run()
-
-        # Choose measurement count to keep total wall time reasonable
-        reps = MEASURE_REPS
-        if num_samples >= 9_600_000:
-            reps = 5
-
-        elapsed = timeit.timeit(run, number=reps)
-        mean_s = elapsed / reps
-        realtime_factor = audio_duration_s / mean_s
-
-        print(
-            f"{label:<10} {num_samples:>12,} {format_time(mean_s):>12} "
-            f"{format_throughput(num_samples, mean_s):>14} "
-            f"{realtime_factor:>8.0f}x"
+        benchmark.pedantic(
+            fe.extract_features,
+            args=(audio, SAMPLE_RATE),
+            warmup_rounds=3,
+            rounds=rounds,
+            iterations=1,
         )
+
+        # Annotate with throughput + realtime factor (shown in extra_info column)
+        mean_s = benchmark.stats["mean"]
+        benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
+        benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
+
+    bench.__name__ = f"test_extract_features_{label}"
+    return bench
+
+
+for _label, _n in DURATIONS:
+    globals()[f"test_extract_features_{_label}"] = _make_bench(_label, _n)
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    sys.exit(
+        pytest.main([
+            __file__,
+            "-v",
+            "--benchmark-sort=name",
+            "--benchmark-columns=mean,stddev,min,max,rounds",
+            "--benchmark-warmup=on",
+        ])
+    )
