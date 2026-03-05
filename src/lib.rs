@@ -12,9 +12,9 @@ struct FeatureExtractor {
 #[pymethods]
 impl FeatureExtractor {
     #[new]
-    fn new() -> Self {
+    fn new(sample_rate: usize) -> Self {
         Self {
-            feature_extractor: vad::filterbank::FilterBank::new(),
+            feature_extractor: vad::filterbank::FilterBank::new(sample_rate),
         }
     }
 
@@ -24,9 +24,9 @@ impl FeatureExtractor {
         audio: PyReadonlyArray1<'py, f32>,
         sample_rate: u32,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-        if sample_rate != 16000 {
+        if ![16000, 8000].contains(&sample_rate) {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Only 16 kHz sample rate is supported, got {}",
+                "Only 16 kHz and 8 kHz sample rates are supported, got {}",
                 sample_rate
             )));
         }

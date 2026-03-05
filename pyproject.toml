@@ -22,12 +22,15 @@ dev = [
     "silero-vad>=6.2.1",
     "soundfile>=0.13.1",
     "tqdm>=4.67.3",
-    "webrtcvad>=2.0.10",
+    "webrtcvad-wheels>=2.0.14",
 ]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
+
+[tool.pytest.ini_options]
+addopts = "-v"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

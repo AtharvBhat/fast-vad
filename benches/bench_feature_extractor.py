@@ -15,15 +15,25 @@ import numpy as np
 import pytest
 import fast_vad
 
-SAMPLE_RATE = 16_000
+SAMPLE_RATE_16K = 16_000
+SAMPLE_RATE_8K  = 8_000
 
-DURATIONS = [
+DURATIONS_16K = [
     ("100ms",  1_600),
     ("1s",     16_000),
     ("10s",    160_000),
     ("1min",   960_000),
     ("10min",  9_600_000),
     ("1hr",    57_600_000),
+]
+
+DURATIONS_8K = [
+    ("100ms",  800),
+    ("1s",     8_000),
+    ("10s",    80_000),
+    ("1min",   480_000),
+    ("10min",  4_800_000),
+    ("1hr",    28_800_000),
 ]
 
 
@@ -59,8 +69,13 @@ def _throughput_str(num_samples: int, mean_s: float) -> str:
 
 
 @pytest.fixture(scope="session")
-def fe():
-    return fast_vad.FeatureExtractor()
+def fe_16k():
+    return fast_vad.FeatureExtractor(SAMPLE_RATE_16K)
+
+
+@pytest.fixture(scope="session")
+def fe_8k():
+    return fast_vad.FeatureExtractor(SAMPLE_RATE_8K)
 
 
 # ---------------------------------------------------------------------------
@@ -68,34 +83,59 @@ def fe():
 # Criterion's  BenchmarkId::new("extract_features", label)  naming.
 # ---------------------------------------------------------------------------
 
-def _make_bench(label: str, num_samples: int):
+def _make_bench_16k(label: str, num_samples: int):
     audio = _make_audio(num_samples)
-    audio_duration_s = num_samples / SAMPLE_RATE
+    audio_duration_s = num_samples / SAMPLE_RATE_16K
     rounds = 5 if num_samples >= 9_600_000 else 20
 
-    def bench(benchmark, fe):
-        benchmark.extra_info["num_samples"] = num_samples
-        benchmark.extra_info["audio_duration_s"] = audio_duration_s
-
+    def bench(benchmark, fe_16k):
+        benchmark.group = "16kHz"
+        benchmark.extra_info["audio"] = label
         benchmark.pedantic(
-            fe.extract_features,
-            args=(audio, SAMPLE_RATE),
+            fe_16k.extract_features,
+            args=(audio, SAMPLE_RATE_16K),
             warmup_rounds=3,
             rounds=rounds,
             iterations=1,
         )
+        if benchmark.stats:
+            mean_s = benchmark.stats["mean"]
+            benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
+            benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
 
-        # Annotate with throughput + realtime factor (shown in extra_info column)
-        mean_s = benchmark.stats["mean"]
-        benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
-        benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
-
-    bench.__name__ = f"test_extract_features_{label}"
+    bench.__name__ = f"test_16k_extract_features_{label}"
     return bench
 
 
-for _label, _n in DURATIONS:
-    globals()[f"test_extract_features_{_label}"] = _make_bench(_label, _n)
+def _make_bench_8k(label: str, num_samples: int):
+    audio = _make_audio(num_samples)
+    audio_duration_s = num_samples / SAMPLE_RATE_8K
+    rounds = 5 if num_samples >= 4_800_000 else 20
+
+    def bench(benchmark, fe_8k):
+        benchmark.group = "8kHz"
+        benchmark.extra_info["audio"] = label
+        benchmark.pedantic(
+            fe_8k.extract_features,
+            args=(audio, SAMPLE_RATE_8K),
+            warmup_rounds=3,
+            rounds=rounds,
+            iterations=1,
+        )
+        if benchmark.stats:
+            mean_s = benchmark.stats["mean"]
+            benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
+            benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
+
+    bench.__name__ = f"test_8k_extract_features_{label}"
+    return bench
+
+
+for _label, _n in DURATIONS_16K:
+    globals()[f"test_16k_extract_features_{_label}"] = _make_bench_16k(_label, _n)
+
+for _label, _n in DURATIONS_8K:
+    globals()[f"test_8k_extract_features_{_label}"] = _make_bench_8k(_label, _n)
 
 
 if __name__ == "__main__":
@@ -105,7 +145,8 @@ if __name__ == "__main__":
         pytest.main([
             __file__,
             "-v",
-            "--benchmark-sort=name",
+            "--benchmark-sort=mean",
+            "--benchmark-group-by=group",
             "--benchmark-columns=mean,stddev,min,max,rounds",
             "--benchmark-warmup=on",
         ])

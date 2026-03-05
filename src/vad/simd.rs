@@ -4,13 +4,13 @@ use realfft::num_complex::Complex32;
 use wide::{f32x8, f32x16};
 
 // Apply Hanning window using SIMD in place
-pub fn apply_hanning_window_simd(frame: &mut [f32]) {
-    debug_assert_eq!(frame.len(), constants::FRAME_SIZE);
-    let hanning = constants::HANN_512;
+pub fn apply_hanning_window_simd(frame: &mut [f32], hanning: &[f32]) {
+    debug_assert_eq!(frame.len(), hanning.len());
+    debug_assert!(frame.len() % 16 == 0, "frame length must be a multiple of 16 for SIMD");
     let simd_width = 16;
 
     // Process in chunks of simd_width
-    (0..constants::FRAME_SIZE / simd_width).for_each(|i| {
+    (0..frame.len() / simd_width).for_each(|i| {
         let frame_chunk = f32x16::from(&frame[i * simd_width..(i + 1) * simd_width]);
         let hanning_chunk = f32x16::from(&hanning[i * simd_width..(i + 1) * simd_width]);
         let windowed_chunk = frame_chunk * hanning_chunk;
@@ -69,23 +69,34 @@ mod tests {
     use realfft::num_complex::Complex32;
     use std::f32::consts::PI;
 
+    const FRAME_SIZE: usize = 512; // frame size for 16 kHz
+    const SAMPLE_RATE: f32 = 16000.0;
+
+    fn hann_window(size: usize) -> Vec<f32> {
+        (0..size)
+            .map(|n| 0.5 * (1.0 - (2.0 * PI * n as f32 / size as f32).cos()))
+            .collect()
+    }
+
     fn zero_spectrum() -> Vec<Complex32> {
-        vec![Complex32::new(0.0, 0.0); constants::FFT_BINS]
+        vec![Complex32::new(0.0, 0.0); constants::ANALYSIS_BINS]
     }
 
     // ─── apply_hanning_window_simd ──────────────────────────────────────────
 
     #[test]
     fn windowing_zeros_stay_zero() {
-        let mut frame = vec![0.0f32; constants::FRAME_SIZE];
-        apply_hanning_window_simd(&mut frame);
+        let mut frame = vec![0.0f32; FRAME_SIZE];
+        let hann = hann_window(FRAME_SIZE);
+        apply_hanning_window_simd(&mut frame, &hann);
         assert!(frame.iter().all(|&x| x == 0.0));
     }
 
     #[test]
     fn windowing_tapers_edges() {
-        let mut frame = vec![1.0f32; constants::FRAME_SIZE];
-        apply_hanning_window_simd(&mut frame);
+        let mut frame = vec![1.0f32; FRAME_SIZE];
+        let hann = hann_window(FRAME_SIZE);
+        apply_hanning_window_simd(&mut frame, &hann);
 
         assert!(
             frame[0].abs() < 1e-6,
@@ -93,25 +104,26 @@ mod tests {
             frame[0]
         );
         assert!(
-            frame[constants::FRAME_SIZE - 1].abs() < 1e-6,
+            frame[FRAME_SIZE - 1].abs() < 0.001,
             "last sample not tapered: {}",
-            frame[constants::FRAME_SIZE - 1]
+            frame[FRAME_SIZE - 1]
         );
 
-        let mid = frame[constants::FRAME_SIZE / 2 - 1];
+        let mid = frame[FRAME_SIZE / 2 - 1];
         assert!((mid - 1.0).abs() < 0.01, "center should be ~1.0, got {mid}");
     }
 
     #[test]
     fn windowing_matches_manual() {
-        let mut frame: Vec<f32> = (0..constants::FRAME_SIZE).map(|i| i as f32).collect();
-        let expected: Vec<f32> = (0..constants::FRAME_SIZE)
-            .map(|i| i as f32 * constants::HANN_512[i])
+        let hann = hann_window(FRAME_SIZE);
+        let mut frame: Vec<f32> = (0..FRAME_SIZE).map(|i| i as f32).collect();
+        let expected: Vec<f32> = (0..FRAME_SIZE)
+            .map(|i| i as f32 * hann[i])
             .collect();
 
-        apply_hanning_window_simd(&mut frame);
+        apply_hanning_window_simd(&mut frame, &hann);
 
-        for i in 0..constants::FRAME_SIZE {
+        for i in 0..FRAME_SIZE {
             assert!(
                 (frame[i] - expected[i]).abs() < 1e-4,
                 "mismatch at {i}: got {}, expected {}",
@@ -125,11 +137,12 @@ mod tests {
     fn windowing_sine_reduces_edge_amplitude() {
         // A sine wave should have its edge samples significantly reduced after windowing.
         let freq = 500.0f32;
-        let mut frame: Vec<f32> = (0..constants::FRAME_SIZE)
-            .map(|i| (2.0 * PI * freq * i as f32 / 16000.0).sin())
+        let hann = hann_window(FRAME_SIZE);
+        let mut frame: Vec<f32> = (0..FRAME_SIZE)
+            .map(|i| (2.0 * PI * freq * i as f32 / SAMPLE_RATE).sin())
             .collect();
         let original_edge = frame[1].abs();
-        apply_hanning_window_simd(&mut frame);
+        apply_hanning_window_simd(&mut frame, &hann);
         assert!(
             frame[1].abs() < original_edge * 0.1,
             "edge not sufficiently tapered: before={original_edge:.4}, after={:.4}",
