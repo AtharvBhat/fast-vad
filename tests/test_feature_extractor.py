@@ -169,7 +169,7 @@ def test_independent_instances_agree():
 
 
 # ---------------------------------------------------------------------------
-# Energies are non-negative
+# Log-energies are bounded below by the noise floor
 # ---------------------------------------------------------------------------
 
 def test_all_energies_above_floor(extractor):
