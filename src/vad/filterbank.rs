@@ -42,6 +42,14 @@ impl FilterBank {
         }
     }
 
+    pub fn frame_size(&self) -> usize {
+        self.frame_size
+    }
+
+    pub fn hann_window(&self) -> &[f32] {
+        &self.hann_window
+    }
+
     // Compute the filterbank energies for a given input signal
     // Drops the last incomplete frame if input length is not a multiple of FRAME_SIZE
     pub fn compute_filterbank(&self, input: &[f32]) -> Vec<f32x8> {

@@ -57,13 +57,13 @@ def extractor_8k():
 
 def test_output_shape_single_frame(extractor_16k):
     audio = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=1)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     assert out.shape == (1, 8), f"Expected (1, 8), got {out.shape}"
 
 
 def test_output_shape_multiple_frames(extractor_16k):
     audio = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=10)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     assert out.shape == (10, 8)
 
 
@@ -71,27 +71,26 @@ def test_trailing_samples_discarded(extractor_16k):
     """Partial last frame must be silently dropped."""
     audio = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=5)
     audio_extra = np.concatenate([audio, np.zeros(100, dtype=np.float32)])
-    out_exact = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
-    out_extra = extractor_16k.extract_features(audio_extra, SAMPLE_RATE_16K)
+    out_exact = extractor_16k.extract_features(audio)
+    out_extra = extractor_16k.extract_features(audio_extra)
     assert out_exact.shape == out_extra.shape
     np.testing.assert_array_equal(out_exact, out_extra)
 
 
 def test_empty_input_returns_empty(extractor_16k):
     audio = np.array([], dtype=np.float32)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     assert out.shape == (0, 8)
 
 
-def test_wrong_sample_rate_raises(extractor_16k):
-    audio = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K)
+def test_wrong_sample_rate_raises():
     with pytest.raises(ValueError):
-        extractor_16k.extract_features(audio, 44100)
+        fast_vad.FeatureExtractor(44100)
 
 
 def test_output_dtype(extractor_16k):
     audio = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     assert out.dtype == np.float32
 
 
@@ -101,34 +100,34 @@ def test_output_dtype(extractor_16k):
 
 def test_8k_output_shape_single_frame(extractor_8k):
     audio = make_sine(1000.0, SAMPLE_RATE_8K, FRAME_SIZE_8K, num_frames=1)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     assert out.shape == (1, 8)
 
 
 def test_8k_output_shape_multiple_frames(extractor_8k):
     audio = make_sine(1000.0, SAMPLE_RATE_8K, FRAME_SIZE_8K, num_frames=10)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     assert out.shape == (10, 8)
 
 
 def test_8k_trailing_samples_discarded(extractor_8k):
     audio = make_sine(1000.0, SAMPLE_RATE_8K, FRAME_SIZE_8K, num_frames=5)
     audio_extra = np.concatenate([audio, np.zeros(50, dtype=np.float32)])
-    out_exact = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
-    out_extra = extractor_8k.extract_features(audio_extra, SAMPLE_RATE_8K)
+    out_exact = extractor_8k.extract_features(audio)
+    out_extra = extractor_8k.extract_features(audio_extra)
     assert out_exact.shape == out_extra.shape
     np.testing.assert_array_equal(out_exact, out_extra)
 
 
 def test_8k_empty_input_returns_empty(extractor_8k):
     audio = np.array([], dtype=np.float32)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     assert out.shape == (0, 8)
 
 
 def test_8k_output_dtype(extractor_8k):
     audio = make_sine(1000.0, SAMPLE_RATE_8K, FRAME_SIZE_8K)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     assert out.dtype == np.float32
 
 
@@ -139,7 +138,7 @@ def test_8k_output_dtype(extractor_8k):
 def test_silence_output_near_floor(extractor_16k):
     """Silence should produce the log-energy floor: ln(0 + 1e-10) ≈ -23.025."""
     audio = np.zeros(FRAME_SIZE_16K * 4, dtype=np.float32)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     floor = math.log(1e-10)
     assert np.allclose(out, floor, atol=0.01), (
         f"Silence should give log-energy floor ≈ {floor:.3f}, got range "
@@ -149,7 +148,7 @@ def test_silence_output_near_floor(extractor_16k):
 
 def test_8k_silence_output_near_floor(extractor_8k):
     audio = np.zeros(FRAME_SIZE_8K * 4, dtype=np.float32)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     floor = math.log(1e-10)
     assert np.allclose(out, floor, atol=0.01)
 
@@ -162,7 +161,7 @@ def test_8k_silence_output_near_floor(extractor_8k):
 def test_tone_dominates_correct_band(extractor_16k, band, freq_hz):
     """A pure sine at a frequency inside a band should produce the highest energy in that band."""
     audio = make_sine(freq_hz, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=4, amplitude=0.9)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     mean_energies = out.mean(axis=0)
     peak = int(np.argmax(mean_energies))
     assert peak == band, (
@@ -175,7 +174,7 @@ def test_tone_dominates_correct_band(extractor_16k, band, freq_hz):
 def test_8k_tone_dominates_correct_band(extractor_8k, band, freq_hz):
     """Same bin layout applies at 8 kHz (bin width is identical)."""
     audio = make_sine(freq_hz, SAMPLE_RATE_8K, FRAME_SIZE_8K, num_frames=4, amplitude=0.9)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     mean_energies = out.mean(axis=0)
     peak = int(np.argmax(mean_energies))
     assert peak == band, (
@@ -191,16 +190,16 @@ def test_8k_tone_dominates_correct_band(extractor_8k, band, freq_hz):
 def test_louder_signal_yields_higher_energy(extractor_16k):
     quiet = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=4, amplitude=0.1)
     loud  = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=4, amplitude=0.8)
-    out_quiet = extractor_16k.extract_features(quiet, SAMPLE_RATE_16K)
-    out_loud  = extractor_16k.extract_features(loud,  SAMPLE_RATE_16K)
+    out_quiet = extractor_16k.extract_features(quiet)
+    out_loud  = extractor_16k.extract_features(loud)
     assert out_loud.mean() > out_quiet.mean()
 
 
 def test_double_amplitude_increases_energy(extractor_16k):
     a1 = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=4, amplitude=0.2)
     a2 = make_sine(1000.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=4, amplitude=0.4)
-    out1 = extractor_16k.extract_features(a1, SAMPLE_RATE_16K)
-    out2 = extractor_16k.extract_features(a2, SAMPLE_RATE_16K)
+    out1 = extractor_16k.extract_features(a1)
+    out2 = extractor_16k.extract_features(a2)
     assert out2.mean() > out1.mean()
 
 
@@ -210,15 +209,15 @@ def test_double_amplitude_increases_energy(extractor_16k):
 
 def test_deterministic_output(extractor_16k):
     audio = make_sine(1500.0, SAMPLE_RATE_16K, FRAME_SIZE_16K, num_frames=8)
-    out1 = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
-    out2 = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out1 = extractor_16k.extract_features(audio)
+    out2 = extractor_16k.extract_features(audio)
     np.testing.assert_array_equal(out1, out2)
 
 
 def test_8k_deterministic_output(extractor_8k):
     audio = make_sine(1500.0, SAMPLE_RATE_8K, FRAME_SIZE_8K, num_frames=8)
-    out1 = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
-    out2 = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out1 = extractor_8k.extract_features(audio)
+    out2 = extractor_8k.extract_features(audio)
     np.testing.assert_array_equal(out1, out2)
 
 
@@ -227,8 +226,8 @@ def test_independent_instances_agree():
     e1 = fast_vad.FeatureExtractor(SAMPLE_RATE_16K)
     e2 = fast_vad.FeatureExtractor(SAMPLE_RATE_16K)
     np.testing.assert_array_equal(
-        e1.extract_features(audio, SAMPLE_RATE_16K),
-        e2.extract_features(audio, SAMPLE_RATE_16K),
+        e1.extract_features(audio),
+        e2.extract_features(audio),
     )
 
 
@@ -241,7 +240,7 @@ def test_all_energies_above_floor(extractor_16k):
     floor = math.log(1e-10)
     rng = np.random.default_rng(42)
     audio = rng.uniform(-1.0, 1.0, FRAME_SIZE_16K * 16).astype(np.float32)
-    out = extractor_16k.extract_features(audio, SAMPLE_RATE_16K)
+    out = extractor_16k.extract_features(audio)
     assert np.all(out >= floor - 0.01), f"Found energies below floor {floor:.3f}: {out[out < floor - 0.01]}"
 
 
@@ -249,5 +248,5 @@ def test_8k_all_energies_above_floor(extractor_8k):
     floor = math.log(1e-10)
     rng = np.random.default_rng(42)
     audio = rng.uniform(-1.0, 1.0, FRAME_SIZE_8K * 16).astype(np.float32)
-    out = extractor_8k.extract_features(audio, SAMPLE_RATE_8K)
+    out = extractor_8k.extract_features(audio)
     assert np.all(out >= floor - 0.01), f"Found energies below floor {floor:.3f}: {out[out < floor - 0.01]}"

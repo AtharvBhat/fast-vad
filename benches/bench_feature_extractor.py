@@ -93,7 +93,7 @@ def _make_bench_16k(label: str, num_samples: int):
         benchmark.extra_info["audio"] = label
         benchmark.pedantic(
             fe_16k.extract_features,
-            args=(audio, SAMPLE_RATE_16K),
+            args=(audio,),
             warmup_rounds=3,
             rounds=rounds,
             iterations=1,
@@ -117,7 +117,7 @@ def _make_bench_8k(label: str, num_samples: int):
         benchmark.extra_info["audio"] = label
         benchmark.pedantic(
             fe_8k.extract_features,
-            args=(audio, SAMPLE_RATE_8K),
+            args=(audio,),
             warmup_rounds=3,
             rounds=rounds,
             iterations=1,
