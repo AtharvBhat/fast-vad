@@ -34,7 +34,7 @@ impl FeatureExtractor {
         let features = self.feature_extractor.compute_filterbank(audio);
         let num_frames = features.len();
 
-        let mut arr = Array2::<f32>::zeros((num_frames, 8));
+        let mut arr = Array2::<f32>::zeros((num_frames, vad::constants::NUM_BANDS));
         for (i, frame) in features.iter().enumerate() {
             arr.row_mut(i)
                 .assign(&ndarray::ArrayView1::from(&frame.to_array()));
