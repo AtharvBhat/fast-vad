@@ -2,7 +2,7 @@
 
 Extremely fast voice activity detection in Rust with Python bindings and streaming mode support.
 
-Supports 16 kHz and 8 kHz audio. Fixed frame width of 31.25 ms (512 and 256 samples respectively).
+Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 kHz and 256 samples at 8 kHz).
 
 ## Build from source
 
