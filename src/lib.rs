@@ -3,6 +3,7 @@ use numpy::{PyArray1, PyArray2, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyModule, PyType};
+use realfft::num_complex::Complex32;
 
 pub mod vad;
 
@@ -65,6 +66,9 @@ fn segments_to_array<'py>(py: Python<'py>, segments: Vec<[usize; 2]>) -> Bound<'
 #[pyclass]
 struct FeatureExtractor {
     feature_extractor: vad::filterbank::FilterBank,
+    window_buf: Vec<f32>,
+    fft_output: Vec<Complex32>,
+    fft_scratch: Vec<Complex32>,
 }
 
 #[pymethods]
@@ -72,9 +76,15 @@ impl FeatureExtractor {
     /// Creates a `FeatureExtractor` for the given sample rate (8000 or 16000 Hz).
     #[new]
     fn new(sample_rate: usize) -> PyResult<Self> {
+        let fe = vad::filterbank::FilterBank::new(sample_rate).map_err(map_vad_error)?;
+        let window_buf = vec![0.0f32; fe.frame_size()];
+        let fft_output = fe.make_output_vec();
+        let fft_scratch = fe.make_scratch_vec();
         Ok(Self {
-            feature_extractor: vad::filterbank::FilterBank::new(sample_rate)
-                .map_err(map_vad_error)?,
+            feature_extractor: fe,
+            window_buf,
+            fft_output,
+            fft_scratch,
         })
     }
 
@@ -96,21 +106,18 @@ impl FeatureExtractor {
     ///
     /// Raises `ValueError` if `len(frame) != frame_size`.
     fn extract_features_frame<'py>(
-        &self,
+        &mut self,
         py: Python<'py>,
         frame: PyReadonlyArray1<'py, f32>,
     ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let frame = frame.as_slice()?;
-        let mut window_buf = vec![0.0f32; self.feature_extractor.frame_size()];
-        let mut fft_output = self.feature_extractor.make_output_vec();
-        let mut fft_scratch = self.feature_extractor.make_scratch_vec();
         let energies = py
             .detach(|| {
                 self.feature_extractor.process_single_frame(
                     frame,
-                    &mut window_buf,
-                    &mut fft_output,
-                    &mut fft_scratch,
+                    &mut self.window_buf,
+                    &mut self.fft_output,
+                    &mut self.fft_scratch,
                 )
             })
             .map_err(map_vad_error)?;
@@ -290,9 +297,14 @@ impl PyVadStateful {
     /// Processes one frame and returns whether speech is active.
     ///
     /// `frame` must contain exactly `frame_size` samples.
-    fn detect_frame<'py>(&mut self, frame: PyReadonlyArray1<'py, f32>) -> PyResult<bool> {
+    fn detect_frame<'py>(
+        &mut self,
+        py: Python<'py>,
+        frame: PyReadonlyArray1<'py, f32>,
+    ) -> PyResult<bool> {
         let frame = frame.as_slice()?;
-        self.vad.detect_frame(frame).map_err(map_vad_error)
+        py.detach(|| self.vad.detect_frame(frame))
+            .map_err(map_vad_error)
     }
 
     /// Resets internal state so the detector can be reused for a new stream.
