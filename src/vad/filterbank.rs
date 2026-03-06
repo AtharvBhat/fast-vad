@@ -1,10 +1,11 @@
-// Filterbank computation for VAD
 use crate::vad::simd;
 use rayon::prelude::*;
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex32;
 use std::sync::Arc;
 use wide::f32x8;
 
+/// Computes log-filterbank energies from raw audio frames.
 pub struct FilterBank {
     fft_forward: Arc<dyn realfft::RealToComplex<f32> + Send + Sync>,
     hann_window: Vec<f32>,
@@ -13,47 +14,92 @@ pub struct FilterBank {
 
 impl Default for FilterBank {
     fn default() -> Self {
-        Self::new(16000)
+        Self::new(16000).expect("16000 Hz is a supported sample rate")
     }
 }
 
 impl FilterBank {
-    pub fn new(sample_rate: usize) -> Self {
+    /// Creates a `FilterBank` for the given sample rate.
+    ///
+    /// Supported sample rates: 8000, 16000 Hz.
+    pub fn new(sample_rate: usize) -> Result<Self, super::VadError> {
         match sample_rate {
             16000 => {
                 let frame_size = 512;
                 let mut fft_planner = RealFftPlanner::new();
-                Self {
+                Ok(Self {
                     fft_forward: fft_planner.plan_fft_forward(frame_size),
                     hann_window: compute_hann_window(frame_size),
                     frame_size,
-                }
+                })
             }
             8000 => {
                 let frame_size = 256;
                 let mut fft_planner = RealFftPlanner::new();
-                Self {
+                Ok(Self {
                     fft_forward: fft_planner.plan_fft_forward(frame_size),
                     hann_window: compute_hann_window(frame_size),
                     frame_size,
-                }
+                })
             }
-            _ => panic!("Unsupported sample rate: {sample_rate} Hz. Only 8000 and 16000 Hz are supported."),
+            _ => Err(super::VadError::UnsupportedSampleRate(sample_rate)),
         }
     }
 
+    /// Number of samples per analysis frame.
     pub fn frame_size(&self) -> usize {
         self.frame_size
     }
 
+    /// The Hann window applied to each frame before FFT.
     pub fn hann_window(&self) -> &[f32] {
         &self.hann_window
     }
 
-    // Compute the filterbank energies for a given input signal
-    // Drops the last incomplete frame if input length is not a multiple of FRAME_SIZE
+    /// Allocates a fresh FFT output buffer sized for this filterbank.
+    pub fn make_output_vec(&self) -> Vec<Complex32> {
+        self.fft_forward.make_output_vec()
+    }
+
+    /// Allocates a fresh FFT scratch buffer sized for this filterbank.
+    pub fn make_scratch_vec(&self) -> Vec<Complex32> {
+        self.fft_forward.make_scratch_vec()
+    }
+
+    /// Processes a single frame using caller-supplied scratch buffers.
+    ///
+    /// Avoids any thread-pool overhead — suitable for streaming use.
+    /// `window_buf` must have `frame_size` elements; `fft_output` and
+    /// `fft_scratch` must come from [`make_output_vec`](Self::make_output_vec)
+    /// and [`make_scratch_vec`](Self::make_scratch_vec).
+    ///
+    /// Returns `Err` if `frame.len() != frame_size`.
+    pub fn process_single_frame(
+        &self,
+        frame: &[f32],
+        window_buf: &mut [f32],
+        fft_output: &mut [Complex32],
+        fft_scratch: &mut [Complex32],
+    ) -> Result<f32x8, super::VadError> {
+        if frame.len() != self.frame_size {
+            return Err(super::VadError::InvalidFrameLength {
+                expected: self.frame_size,
+                got: frame.len(),
+            });
+        }
+        window_buf.copy_from_slice(frame);
+        simd::apply_hanning_window_simd(window_buf, &self.hann_window);
+        self.fft_forward
+            .process_with_scratch(window_buf, fft_output, fft_scratch)
+            .expect("FFT processing failed");
+        Ok(simd::compute_band_energies_simd(fft_output))
+    }
+
+    /// Computes log-filterbank energies for each complete frame in `input`.
+    ///
+    /// Drops any trailing samples that do not fill a complete frame.
     pub fn compute_filterbank(&self, input: &[f32]) -> Vec<f32x8> {
-        let energies: Vec<f32x8> = input
+        input
             .par_chunks_exact(self.frame_size)
             .map_init(
                 || {
@@ -68,19 +114,18 @@ impl FilterBank {
                     simd::apply_hanning_window_simd(window, &self.hann_window);
                     self.fft_forward
                         .process_with_scratch(window, output, scratch)
-                        .expect("FFT processing failed in FilterBank::compute_filterbank");
+                        .expect("FFT processing failed");
                     simd::compute_band_energies_simd(output)
                 },
             )
-            .collect();
-        energies
+            .collect()
     }
 }
 
 fn compute_hann_window(size: usize) -> Vec<f32> {
     let mut window = vec![0.0f32; size];
-    for n in 0..size {
-        window[n] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * n as f32 / size as f32).cos());
+    for (n, sample) in window.iter_mut().enumerate() {
+        *sample = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * n as f32 / size as f32).cos());
     }
     window
 }
@@ -93,9 +138,7 @@ mod tests {
     use wide::f32x8;
 
     const SAMPLE_RATE: usize = 16000;
-    const FRAME_SIZE: usize = 512; // frame size for 16 kHz
-
-    // ─── Helpers ────────────────────────────────────────────────────────────
+    const FRAME_SIZE: usize = 512;
 
     fn sine_frame(freq_hz: f32, amplitude: f32) -> Vec<f32> {
         (0..FRAME_SIZE)
@@ -143,11 +186,9 @@ mod tests {
             .0
     }
 
-    // ─── Silence ────────────────────────────────────────────────────────────
-
     #[test]
     fn silence_all_bands_very_low() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&silence_frame());
         let energies = energies_to_array(result[0]);
 
@@ -160,11 +201,9 @@ mod tests {
         }
     }
 
-    // ─── Pure tones: each tone should dominate its expected band ────────────
-
     #[test]
     fn tone_dominates_other_bands() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let test_cases: &[(f32, usize)] = &[
             (150.0, 0),
             (300.0, 1),
@@ -195,11 +234,9 @@ mod tests {
         }
     }
 
-    // ─── Amplitude ──────────────────────────────────────────────────────────
-
     #[test]
     fn louder_signal_higher_energy() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let quiet = fb.compute_filterbank(&sine_frame(500.0, 0.1));
         let loud = fb.compute_filterbank(&sine_frame(500.0, 0.9));
 
@@ -216,14 +253,13 @@ mod tests {
 
     #[test]
     fn double_amplitude_approximately_ln4() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let e1 = fb.compute_filterbank(&sine_frame(500.0, 0.25));
         let e2 = fb.compute_filterbank(&sine_frame(500.0, 0.50));
 
         let a1 = energies_to_array(e1[0]);
         let a2 = energies_to_array(e2[0]);
 
-        // 2x amplitude → 4x power → ln(4) ≈ 1.386 increase
         let diff = a2[2] - a1[2];
         assert!(
             (diff - 1.386).abs() < 0.5,
@@ -233,8 +269,7 @@ mod tests {
 
     #[test]
     fn energy_monotone_with_amplitude() {
-        // Energy in the target band should increase monotonically with amplitude.
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let amplitudes = [0.05f32, 0.1, 0.2, 0.4, 0.8];
         let mut prev = f32::NEG_INFINITY;
         for &amp in &amplitudes {
@@ -248,11 +283,9 @@ mod tests {
         }
     }
 
-    // ─── White noise ────────────────────────────────────────────────────────
-
     #[test]
     fn white_noise_all_bands_active() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&white_noise_frame(0.3, 12345));
         let energies = energies_to_array(result[0]);
 
@@ -267,7 +300,7 @@ mod tests {
 
     #[test]
     fn white_noise_no_extreme_dominance() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&white_noise_frame(0.3, 99999));
         let energies = energies_to_array(result[0]);
 
@@ -281,9 +314,7 @@ mod tests {
 
     #[test]
     fn white_noise_wider_bands_more_energy() {
-        // Band 7 spans 800Hz, band 0 spans 120Hz.
-        // More bandwidth → more captured noise power.
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&white_noise_frame(0.3, 54321));
         let energies = energies_to_array(result[0]);
 
@@ -295,30 +326,21 @@ mod tests {
         );
     }
 
-    // ─── Multi-tone ─────────────────────────────────────────────────────────
-
     #[test]
     fn multi_tone_energy_in_expected_bands() {
-        let fb = FilterBank::new(SAMPLE_RATE);
-        let frame = multi_tone_frame(&[
-            (150.0, 0.3),   // band 0
-            (500.0, 0.2),   // band 2
-            (1300.0, 0.15), // band 4
-        ]);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let frame = multi_tone_frame(&[(150.0, 0.3), (500.0, 0.2), (1300.0, 0.15)]);
         let result = fb.compute_filterbank(&frame);
         let energies = energies_to_array(result[0]);
 
-        // Bands with tones should beat their neighbors
         assert!(energies[0] > energies[1] + 1.5, "band 0 vs 1");
         assert!(energies[2] > energies[3] + 1.5, "band 2 vs 3");
         assert!(energies[4] > energies[5] + 1.5, "band 4 vs 5");
     }
 
-    // ─── Determinism ────────────────────────────────────────────────────────
-
     #[test]
     fn same_input_same_output() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let frame = sine_frame(440.0, 0.5);
 
         let r1 = fb.compute_filterbank(&frame);
@@ -334,8 +356,8 @@ mod tests {
 
     #[test]
     fn separate_instances_agree() {
-        let fb1 = FilterBank::new(SAMPLE_RATE);
-        let fb2 = FilterBank::new(SAMPLE_RATE);
+        let fb1 = FilterBank::new(SAMPLE_RATE).unwrap();
+        let fb2 = FilterBank::new(SAMPLE_RATE).unwrap();
         let frame = sine_frame(1000.0, 0.5);
 
         let e1 = energies_to_array(fb1.compute_filterbank(&frame)[0]);
@@ -351,27 +373,25 @@ mod tests {
         }
     }
 
-    // ─── Sample rate smoke tests ─────────────────────────────────────────────
-
     #[test]
     fn rate_16khz_produces_correct_frame_count() {
-        let fb = FilterBank::new(16000);
-        let audio = vec![0.0f32; 16000]; // 1 second → 16000/512 = 31 frames
+        let fb = FilterBank::new(16000).unwrap();
+        let audio = vec![0.0f32; 16000];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), 31);
     }
 
     #[test]
     fn rate_8khz_produces_correct_frame_count() {
-        let fb = FilterBank::new(8000);
-        let audio = vec![0.0f32; 8000]; // 1 second → 8000/256 = 31 frames
+        let fb = FilterBank::new(8000).unwrap();
+        let audio = vec![0.0f32; 8000];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), 31);
     }
 
     #[test]
     fn rate_16khz_output_finite() {
-        let fb = FilterBank::new(16000);
+        let fb = FilterBank::new(16000).unwrap();
         let audio: Vec<f32> = (0..512)
             .map(|i| 0.5 * (2.0 * PI * 1000.0 * i as f32 / 16000.0).sin())
             .collect();
@@ -381,7 +401,7 @@ mod tests {
 
     #[test]
     fn rate_8khz_output_finite() {
-        let fb = FilterBank::new(8000);
+        let fb = FilterBank::new(8000).unwrap();
         let audio: Vec<f32> = (0..256)
             .map(|i| 0.5 * (2.0 * PI * 1000.0 * i as f32 / 8000.0).sin())
             .collect();
@@ -390,31 +410,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn unsupported_sample_rate_panics() {
-        FilterBank::new(44100);
+    fn unsupported_sample_rate_returns_error() {
+        assert!(FilterBank::new(44100).is_err());
     }
-
-    // ─── Batch frame count ──────────────────────────────────────────────────
 
     #[test]
     fn frame_count_one_second() {
-        let fb = FilterBank::new(SAMPLE_RATE);
-        let audio = vec![0.0f32; SAMPLE_RATE]; // 1 second at 16kHz
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let audio = vec![0.0f32; SAMPLE_RATE];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), SAMPLE_RATE / FRAME_SIZE);
     }
 
     #[test]
     fn frame_count_empty() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&[]);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn frame_count_less_than_one_frame() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let audio = vec![0.0f32; FRAME_SIZE - 1];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), 0);
@@ -422,7 +439,7 @@ mod tests {
 
     #[test]
     fn frame_count_exact_one_frame() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let audio = vec![0.0f32; FRAME_SIZE];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), 1);
@@ -430,19 +447,16 @@ mod tests {
 
     #[test]
     fn frame_count_trailing_discarded() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let audio = vec![0.0f32; FRAME_SIZE * 3 + 100];
         let result = fb.compute_filterbank(&audio);
         assert_eq!(result.len(), 3);
     }
 
-    // ─── Batch consistency ──────────────────────────────────────────────────
-
     #[test]
     fn batch_matches_individual() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
 
-        // 5 frames of different content
         let mut audio = Vec::with_capacity(FRAME_SIZE * 5);
         audio.extend(sine_frame(150.0, 0.5));
         audio.extend(sine_frame(800.0, 0.3));
@@ -452,7 +466,6 @@ mod tests {
 
         let batch = fb.compute_filterbank(&audio);
 
-        // Process each frame individually and compare
         let frames: Vec<Vec<f32>> = vec![
             sine_frame(150.0, 0.5),
             sine_frame(800.0, 0.3),
@@ -477,13 +490,9 @@ mod tests {
         }
     }
 
-    // ─── Edge frequencies: tones right at band boundaries ───────────────────
-
     #[test]
     fn tone_at_band_boundary_lands_in_one_band() {
-        // 200Hz is the boundary between band 0 and band 1.
-        // It should land in one of them, not crash or produce NaN.
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&sine_frame(200.0, 0.5));
         let energies = energies_to_array(result[0]);
 
@@ -493,21 +502,14 @@ mod tests {
             "200Hz boundary tone should peak in band 0 or 1, got {p}"
         );
 
-        // Should still have finite values everywhere
         for (band, &energy) in energies.iter().enumerate() {
-            assert!(
-                energy.is_finite(),
-                "band {band} is not finite: {}",
-                energy
-            );
+            assert!(energy.is_finite(), "band {band} is not finite: {}", energy);
         }
     }
 
-    // ─── No NaN or Inf ──────────────────────────────────────────────────────
-
     #[test]
     fn no_nan_or_inf_on_silence() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&silence_frame());
         let energies = energies_to_array(result[0]);
         for (band, &energy) in energies.iter().enumerate() {
@@ -517,7 +519,7 @@ mod tests {
 
     #[test]
     fn no_nan_or_inf_on_max_amplitude() {
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
         let result = fb.compute_filterbank(&sine_frame(1000.0, 1.0));
         let energies = energies_to_array(result[0]);
         for (band, &energy) in energies.iter().enumerate() {
@@ -527,11 +529,7 @@ mod tests {
 
     #[test]
     fn energy_phase_invariant() {
-        // FFT power is magnitude-squared, so band energies should not depend on
-        // the starting phase of a tone — only its amplitude matters.
-        // 500 Hz sits at exactly bin 16 (16 * 16000/512 = 500 Hz), making it
-        // periodic within the 512-sample window and ideal for this check.
-        let fb = FilterBank::new(SAMPLE_RATE);
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
 
         let frame_0: Vec<f32> = (0..FRAME_SIZE)
             .map(|i| 0.5 * (2.0 * PI * 500.0 * i as f32 / SAMPLE_RATE as f32).sin())
@@ -543,9 +541,6 @@ mod tests {
         let e0 = energies_to_array(fb.compute_filterbank(&frame_0)[0]);
         let e90 = energies_to_array(fb.compute_filterbank(&frame_90)[0]);
 
-        // Phase invariance holds where the tone actually lives. Out-of-band leakage
-        // is near the noise floor, so log-scale differences there can be large
-        // while remaining physically negligible.
         assert!(
             (e0[2] - e90[2]).abs() < 0.05,
             "band 2: energy should be phase-invariant (0°={:.3}, 90°={:.3})",
