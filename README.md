@@ -1,11 +1,8 @@
 # fast-vad
 
-Fast voice activity detection (VAD) in Rust with Python bindings.
+Extremely fast voice activity detection in Rust with Python bindings and streaming mode support.
 
-- 8-band log-filterbank features with SIMD-accelerated FFT
-- Logistic regression classifier with noise floor tracking
-- Batch and streaming APIs
-- Supports 8000 and 16000 Hz audio
+Supports 16 kHz and 8 kHz audio. Fixed frame width of 31.25 ms (512 and 256 samples respectively).
 
 ## Build from source
 
