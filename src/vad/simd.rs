@@ -6,7 +6,10 @@ use wide::{f32x8, f32x16};
 // Apply Hanning window using SIMD in place
 pub fn apply_hanning_window_simd(frame: &mut [f32], hanning: &[f32]) {
     debug_assert_eq!(frame.len(), hanning.len());
-    debug_assert!(frame.len() % 16 == 0, "frame length must be a multiple of 16 for SIMD");
+    debug_assert!(
+        frame.len().is_multiple_of(16),
+        "frame length must be a multiple of 16 for SIMD"
+    );
     let simd_width = 16;
 
     // Process in chunks of simd_width
@@ -117,9 +120,7 @@ mod tests {
     fn windowing_matches_manual() {
         let hann = hann_window(FRAME_SIZE);
         let mut frame: Vec<f32> = (0..FRAME_SIZE).map(|i| i as f32).collect();
-        let expected: Vec<f32> = (0..FRAME_SIZE)
-            .map(|i| i as f32 * hann[i])
-            .collect();
+        let expected: Vec<f32> = (0..FRAME_SIZE).map(|i| i as f32 * hann[i]).collect();
 
         apply_hanning_window_simd(&mut frame, &hann);
 
