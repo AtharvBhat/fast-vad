@@ -1,8 +1,8 @@
 """
-Criterion-style Python benchmark for VAD using pytest-benchmark.
+Python benchmark for VAD using pytest-benchmark.
 
 Run with:
-    uv run benches/bench_vad.py
+    uv run pytest benches/bench_vad.py --benchmark-sort=mean --benchmark-group-by=group
 """
 
 import numpy as np
@@ -70,36 +70,35 @@ def _run_stateful(vad_stateful, frames: np.ndarray) -> None:
 
 @pytest.fixture(scope="session")
 def vad_16k():
-    return fast_vad.VAD(SAMPLE_RATE_16K)
+    return fast_vad.VAD.with_mode(SAMPLE_RATE_16K, fast_vad.mode.normal)
 
 
 @pytest.fixture(scope="session")
 def vad_8k():
-    return fast_vad.VAD(SAMPLE_RATE_8K)
+    return fast_vad.VAD.with_mode(SAMPLE_RATE_8K, fast_vad.mode.normal)
 
 
 @pytest.fixture(scope="session")
 def stateful_16k():
-    return fast_vad.VadStateful(SAMPLE_RATE_16K, fast_vad.mode.normal)
+    return fast_vad.VadStateful.with_mode(SAMPLE_RATE_16K, fast_vad.mode.normal)
 
 
 @pytest.fixture(scope="session")
 def stateful_8k():
-    return fast_vad.VadStateful(SAMPLE_RATE_8K, fast_vad.mode.normal)
+    return fast_vad.VadStateful.with_mode(SAMPLE_RATE_8K, fast_vad.mode.normal)
 
 
-def _make_batch_bench_16k(api_name: str, label: str, num_samples: int):
+def _make_batch_bench_16k(label: str, num_samples: int):
     audio = _make_audio(num_samples)
     audio_duration_s = num_samples / SAMPLE_RATE_16K
     rounds = 5 if num_samples >= 9_600_000 else 20
 
     def bench(benchmark, vad_16k):
-        benchmark.group = f"16kHz/{api_name}"
+        benchmark.group = "16kHz/detect"
         benchmark.extra_info["audio"] = label
-        fn = getattr(vad_16k, api_name)
         benchmark.pedantic(
-            fn,
-            args=(audio, fast_vad.mode.normal),
+            vad_16k.detect,
+            args=(audio,),
             warmup_rounds=3,
             rounds=rounds,
             iterations=1,
@@ -109,22 +108,21 @@ def _make_batch_bench_16k(api_name: str, label: str, num_samples: int):
             benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
             benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
 
-    bench.__name__ = f"test_16000_{api_name}_{label}"
+    bench.__name__ = f"test_16000_detect_{label}"
     return bench
 
 
-def _make_batch_bench_8k(api_name: str, label: str, num_samples: int):
+def _make_batch_bench_8k(label: str, num_samples: int):
     audio = _make_audio(num_samples)
     audio_duration_s = num_samples / SAMPLE_RATE_8K
     rounds = 5 if num_samples >= 4_800_000 else 20
 
     def bench(benchmark, vad_8k):
-        benchmark.group = f"8kHz/{api_name}"
+        benchmark.group = "8kHz/detect"
         benchmark.extra_info["audio"] = label
-        fn = getattr(vad_8k, api_name)
         benchmark.pedantic(
-            fn,
-            args=(audio, fast_vad.mode.normal),
+            vad_8k.detect,
+            args=(audio,),
             warmup_rounds=3,
             rounds=rounds,
             iterations=1,
@@ -134,7 +132,7 @@ def _make_batch_bench_8k(api_name: str, label: str, num_samples: int):
             benchmark.extra_info["throughput"] = _throughput_str(num_samples, mean_s)
             benchmark.extra_info["realtime"] = f"{audio_duration_s / mean_s:,.0f}x"
 
-    bench.__name__ = f"test_8000_{api_name}_{label}"
+    bench.__name__ = f"test_8000_detect_{label}"
     return bench
 
 
@@ -191,13 +189,11 @@ def _make_stateful_bench_8k(label: str, num_samples: int):
 
 
 for _label, _n in DURATIONS_16K:
-    for _api in ["detect", "detect_frames", "detect_segments"]:
-        globals()[f"test_16000_{_api}_{_label}"] = _make_batch_bench_16k(_api, _label, _n)
+    globals()[f"test_16000_detect_{_label}"] = _make_batch_bench_16k(_label, _n)
     globals()[f"test_16000_stateful_detect_frame_{_label}"] = _make_stateful_bench_16k(_label, _n)
 
 for _label, _n in DURATIONS_8K:
-    for _api in ["detect", "detect_frames", "detect_segments"]:
-        globals()[f"test_8000_{_api}_{_label}"] = _make_batch_bench_8k(_api, _label, _n)
+    globals()[f"test_8000_detect_{_label}"] = _make_batch_bench_8k(_label, _n)
     globals()[f"test_8000_stateful_detect_frame_{_label}"] = _make_stateful_bench_8k(_label, _n)
 
 

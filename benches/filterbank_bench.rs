@@ -15,7 +15,7 @@ fn generate_audio(num_samples: usize) -> Vec<f32> {
 }
 
 fn bench_filterbank(c: &mut Criterion) {
-    let fb = FilterBank::new(16000);
+    let fb = FilterBank::new(16000).unwrap();
 
     let durations: &[(&str, usize)] = &[
         ("100ms", 1_600),

@@ -20,8 +20,8 @@ fn bench_vad_for_rate(
     durations: &[(&str, usize)],
     label: &str,
 ) {
-    let vad = VAD::new(sample_rate);
-    let frame_size = if sample_rate == 16000 { 512 } else { 256 };
+    let vad = VAD::with_mode(sample_rate, VADModes::Normal).unwrap();
+    let frame_size = vad.frame_size();
 
     let mut group = c.benchmark_group(format!("vad_{label}"));
 
@@ -34,23 +34,7 @@ fn bench_vad_for_rate(
             BenchmarkId::new("detect", duration_label),
             &audio,
             |b, audio| {
-                b.iter(|| black_box(vad.detect(audio, VADModes::Normal)));
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("detect_frames", duration_label),
-            &audio,
-            |b, audio| {
-                b.iter(|| black_box(vad.detect_frames(audio, VADModes::Normal)));
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("detect_segments", duration_label),
-            &audio,
-            |b, audio| {
-                b.iter(|| black_box(vad.detect_segments(audio, VADModes::Normal)));
+                b.iter(|| black_box(vad.detect(audio)));
             },
         );
 
@@ -58,7 +42,7 @@ fn bench_vad_for_rate(
             BenchmarkId::new("stateful_detect_frame", duration_label),
             &audio,
             |b, audio| {
-                let mut stateful = VadStateful::new(sample_rate, VADModes::Normal);
+                let mut stateful = VadStateful::with_mode(sample_rate, VADModes::Normal).unwrap();
                 b.iter(|| {
                     stateful.reset_state();
                     for frame in audio.chunks_exact(frame_size) {

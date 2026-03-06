@@ -1,5 +1,6 @@
 use crate::vad::simd;
 use rayon::prelude::*;
+use realfft::num_complex::Complex32;
 use realfft::RealFftPlanner;
 use std::sync::Arc;
 use wide::f32x8;
@@ -53,6 +54,37 @@ impl FilterBank {
     /// The Hann window applied to each frame before FFT.
     pub fn hann_window(&self) -> &[f32] {
         &self.hann_window
+    }
+
+    /// Allocates a fresh FFT output buffer sized for this filterbank.
+    pub fn make_output_vec(&self) -> Vec<Complex32> {
+        self.fft_forward.make_output_vec()
+    }
+
+    /// Allocates a fresh FFT scratch buffer sized for this filterbank.
+    pub fn make_scratch_vec(&self) -> Vec<Complex32> {
+        self.fft_forward.make_scratch_vec()
+    }
+
+    /// Processes a single frame using caller-supplied scratch buffers.
+    ///
+    /// Avoids any thread-pool overhead — suitable for streaming use.
+    /// `window_buf` must have `frame_size` elements; `fft_output` and
+    /// `fft_scratch` must come from [`make_output_vec`](Self::make_output_vec)
+    /// and [`make_scratch_vec`](Self::make_scratch_vec).
+    pub fn process_single_frame(
+        &self,
+        frame: &[f32],
+        window_buf: &mut [f32],
+        fft_output: &mut [Complex32],
+        fft_scratch: &mut [Complex32],
+    ) -> f32x8 {
+        window_buf.copy_from_slice(frame);
+        simd::apply_hanning_window_simd(window_buf, &self.hann_window);
+        self.fft_forward
+            .process_with_scratch(window_buf, fft_output, fft_scratch)
+            .expect("FFT processing failed");
+        simd::compute_band_energies_simd(fft_output)
     }
 
     /// Computes log-filterbank energies for each complete frame in `input`.

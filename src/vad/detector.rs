@@ -1,4 +1,5 @@
 use crate::vad::{VadError, constants, filterbank};
+use realfft::num_complex::Complex32;
 use wide::f32x8;
 
 const PROBABILITY_EPSILON: f32 = 1e-6;
@@ -433,19 +434,32 @@ pub struct VadStateful {
     state: VADState,
     is_first_frame: bool,
     smoother: OnlineSmoother,
+    window_buf: Vec<f32>,
+    fft_output: Vec<Complex32>,
+    fft_scratch: Vec<Complex32>,
 }
 
 impl VadStateful {
-    fn build(sample_rate: usize, config: DetectionConfig) -> Result<Self, VadError> {
-        let filterbank = filterbank::FilterBank::new(sample_rate)?;
-        let frame_size = filterbank.frame_size();
-        Ok(Self {
-            filterbank,
+    fn from_filterbank(fb: filterbank::FilterBank, config: DetectionConfig) -> Self {
+        let frame_size = fb.frame_size();
+        let window_buf = vec![0.0f32; frame_size];
+        let fft_output = fb.make_output_vec();
+        let fft_scratch = fb.make_scratch_vec();
+        Self {
+            filterbank: fb,
             frame_size,
             state: init_state(),
             is_first_frame: true,
             smoother: OnlineSmoother::new(config),
-        })
+            window_buf,
+            fft_output,
+            fft_scratch,
+        }
+    }
+
+    fn build(sample_rate: usize, config: DetectionConfig) -> Result<Self, VadError> {
+        let filterbank = filterbank::FilterBank::new(sample_rate)?;
+        Ok(Self::from_filterbank(filterbank, config))
     }
 
     /// Creates a `VadStateful` with the default [`VADModes::Normal`] mode.
@@ -463,13 +477,7 @@ impl VadStateful {
         let filterbank = filterbank::FilterBank::new(sample_rate)?;
         let frame_size = filterbank.frame_size();
         let det_config = vad_config_to_detection_config(config, sample_rate, frame_size);
-        Ok(Self {
-            filterbank,
-            frame_size,
-            state: init_state(),
-            is_first_frame: true,
-            smoother: OnlineSmoother::new(det_config),
-        })
+        Ok(Self::from_filterbank(filterbank, det_config))
     }
 
     /// Number of samples per frame expected by [`detect_frame`](Self::detect_frame).
@@ -488,11 +496,15 @@ impl VadStateful {
             });
         }
 
-        let features = self.filterbank.compute_filterbank(frame);
-        debug_assert_eq!(features.len(), 1);
+        let features = self.filterbank.process_single_frame(
+            frame,
+            &mut self.window_buf,
+            &mut self.fft_output,
+            &mut self.fft_scratch,
+        );
 
         let raw_is_speech = classify_frame(
-            features[0],
+            features,
             &mut self.state,
             self.smoother.config.logit_threshold,
             self.is_first_frame,
