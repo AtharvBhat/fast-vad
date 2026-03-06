@@ -1,7 +1,7 @@
 use crate::vad::simd;
 use rayon::prelude::*;
-use realfft::num_complex::Complex32;
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex32;
 use std::sync::Arc;
 use wide::f32x8;
 
