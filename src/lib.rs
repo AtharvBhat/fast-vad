@@ -90,6 +90,33 @@ impl FeatureExtractor {
         PyArray1::from_slice(py, self.feature_extractor.hann_window())
     }
 
+    /// Extracts filterbank features from a single frame of exactly `frame_size` samples.
+    ///
+    /// Returns a float32 array of shape `(8,)`.
+    ///
+    /// Raises `ValueError` if `len(frame) != frame_size`.
+    fn extract_features_frame<'py>(
+        &self,
+        py: Python<'py>,
+        frame: PyReadonlyArray1<'py, f32>,
+    ) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let frame = frame.as_slice()?;
+        let mut window_buf = vec![0.0f32; self.feature_extractor.frame_size()];
+        let mut fft_output = self.feature_extractor.make_output_vec();
+        let mut fft_scratch = self.feature_extractor.make_scratch_vec();
+        let energies = py
+            .detach(|| {
+                self.feature_extractor.process_single_frame(
+                    frame,
+                    &mut window_buf,
+                    &mut fft_output,
+                    &mut fft_scratch,
+                )
+            })
+            .map_err(map_vad_error)?;
+        Ok(PyArray1::from_slice(py, &energies.to_array()))
+    }
+
     /// Extracts filterbank features from `audio`.
     ///
     /// Returns a `(num_frames, 8)` float32 array. Trailing samples that do not

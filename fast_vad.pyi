@@ -24,6 +24,21 @@ class FeatureExtractor:
         """Hann window applied to each frame before FFT. Shape: (frame_size,)."""
         ...
 
+    def extract_features_frame(self, frame: NDArray[np.float32]) -> NDArray[np.float32]:
+        """
+        Extract filterbank features from a single frame.
+
+        Args:
+            frame: 1-D float32 array of exactly ``frame_size`` samples.
+
+        Returns:
+            Float32 array of shape (8,).
+
+        Raises:
+            ValueError: If ``len(frame) != frame_size``.
+        """
+        ...
+
     def extract_features(self, audio: NDArray[np.float32]) -> NDArray[np.float32]:
         """
         Extract filterbank features from audio.

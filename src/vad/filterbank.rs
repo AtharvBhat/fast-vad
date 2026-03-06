@@ -72,19 +72,27 @@ impl FilterBank {
     /// `window_buf` must have `frame_size` elements; `fft_output` and
     /// `fft_scratch` must come from [`make_output_vec`](Self::make_output_vec)
     /// and [`make_scratch_vec`](Self::make_scratch_vec).
+    ///
+    /// Returns `Err` if `frame.len() != frame_size`.
     pub fn process_single_frame(
         &self,
         frame: &[f32],
         window_buf: &mut [f32],
         fft_output: &mut [Complex32],
         fft_scratch: &mut [Complex32],
-    ) -> f32x8 {
+    ) -> Result<f32x8, super::VadError> {
+        if frame.len() != self.frame_size {
+            return Err(super::VadError::InvalidFrameLength {
+                expected: self.frame_size,
+                got: frame.len(),
+            });
+        }
         window_buf.copy_from_slice(frame);
         simd::apply_hanning_window_simd(window_buf, &self.hann_window);
         self.fft_forward
             .process_with_scratch(window_buf, fft_output, fft_scratch)
             .expect("FFT processing failed");
-        simd::compute_band_energies_simd(fft_output)
+        Ok(simd::compute_band_energies_simd(fft_output))
     }
 
     /// Computes log-filterbank energies for each complete frame in `input`.

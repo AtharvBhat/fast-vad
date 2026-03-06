@@ -501,7 +501,7 @@ impl VadStateful {
             &mut self.window_buf,
             &mut self.fft_output,
             &mut self.fft_scratch,
-        );
+        )?;
 
         let raw_is_speech = classify_frame(
             features,
