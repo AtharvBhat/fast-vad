@@ -77,7 +77,10 @@ jobs:
           python-version: "3.12"
       - name: Install test dependencies
         run: python -m pip install --upgrade pip maturin numpy pytest
-      - run: maturin develop --release
+      - name: Build wheel
+        run: maturin build --release --out dist
+      - name: Install built wheel
+        run: python -m pip install dist/*.whl
       - run: pytest
 
   build-wheels:
