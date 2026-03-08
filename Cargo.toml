@@ -10,6 +10,7 @@ documentation = "https://docs.rs/fast-vad"
 readme = "README.md"
 keywords = ["vad", "audio", "speech", "voice", "pyo3"]
 include = [
+    "/build.rs",
     "/README.md",
     "/LICENSE-APACHE",
     "/LICENSE-MIT",
@@ -34,6 +35,9 @@ wide = "1.1.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+
+[build-dependencies]
+pyo3-build-config = "0.28.2"
 
 [[bench]]
 name = "filterbank_bench"
