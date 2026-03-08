@@ -2,6 +2,22 @@
 name = "fast-vad"
 version = "0.1.0"
 edition = "2024"
+description = "Extremely fast voice activity detection in Rust with Python bindings and streaming mode support."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtharvBhat/fast-vad"
+homepage = "https://github.com/AtharvBhat/fast-vad"
+documentation = "https://docs.rs/fast-vad"
+readme = "README.md"
+keywords = ["vad", "audio", "speech", "voice", "pyo3"]
+include = [
+    "/README.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/pyproject.toml",
+    "/fast_vad.pyi",
+    "/src/lib.rs",
+    "/src/vad/**",
+]
 
 [lib]
 name = "fast_vad"

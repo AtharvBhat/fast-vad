@@ -11,7 +11,7 @@ Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 k
 Requires [uv](https://docs.astral.sh/uv/) and a Rust toolchain.
 
 ```bash
-git clone https://github.com/youruser/fast-vad
+git clone https://github.com/AtharvBhat/fast-vad
 cd fast-vad
 uv venv
 uv pip install maturin

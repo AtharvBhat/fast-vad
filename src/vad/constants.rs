@@ -1,16 +1,18 @@
-// Constants used in the VAD implementation.
+//! Internal constants used by the filterbank and detector.
 
 use wide::f32x8;
 
-// Number of FFT bins used for analysis. BAND_BINS covers [0, ANALYSIS_BINS),
-// which spans 0–4 kHz at 16 kHz sample rate. The Nyquist bin and everything
-// above it are intentionally excluded.
+/// Number of FFT bins used during band-energy analysis.
+///
+/// [`BAND_BINS`] covers the range `[0, ANALYSIS_BINS)`, which spans 0-4 kHz
+/// at 16 kHz sample rate. The Nyquist bin and everything above it are
+/// intentionally excluded.
 pub const ANALYSIS_BINS: usize = 128;
 
-// 8 total frequency bands
+/// Number of logarithmic frequency bands in the filterbank.
 pub const NUM_BANDS: usize = 8;
 
-// The VAD operates on 512-sample frames, which corresponds to 32 ms at a 16 kHz sample rate.
+/// Half-open FFT-bin ranges for each of the eight filterbank bands.
 pub static BAND_BINS: [(usize, usize); NUM_BANDS] = [
     (3, 6),
     (6, 12),
@@ -22,8 +24,7 @@ pub static BAND_BINS: [(usize, usize); NUM_BANDS] = [
     (108, 128),
 ];
 
-// Logistic regression weights and bias for 8 raw features, 8 noise normalized features
-// 8 first order delta features, and 8 second order delta features.
+/// Logistic-regression weights applied to raw band energies.
 pub static RAW_WEIGHTS: f32x8 = f32x8::new([
     0.01562034,  // raw_80-200
     0.20278303,  // raw_200-380
@@ -35,6 +36,7 @@ pub static RAW_WEIGHTS: f32x8 = f32x8::new([
     0.28920355,  // raw_3.2k-4k
 ]);
 
+/// Logistic-regression weights applied to noise-normalized band energies.
 pub static NORM_WEIGHTS: f32x8 = f32x8::new([
     0.17463323,  // norm_80-200
     0.543_774_2, // norm_200-380
@@ -46,6 +48,7 @@ pub static NORM_WEIGHTS: f32x8 = f32x8::new([
     0.152_284_6, // norm_3.2k-4k
 ]);
 
+/// Logistic-regression weights applied to first-order temporal deltas.
 pub static DELTA_WEIGHTS: f32x8 = f32x8::new([
     -0.18790886,  // delta_80-200
     -0.73869383,  // delta_200-380
@@ -57,6 +60,7 @@ pub static DELTA_WEIGHTS: f32x8 = f32x8::new([
     -0.363_977_5, // delta_3.2k-4k
 ]);
 
+/// Logistic-regression weights applied to second-order temporal deltas.
 pub static DELTA2_WEIGHTS: f32x8 = f32x8::new([
     0.08596912,  // delta2_80-200
     0.321_316_9, // delta2_200-380
@@ -68,6 +72,8 @@ pub static DELTA2_WEIGHTS: f32x8 = f32x8::new([
     0.12189715,  // delta2_3.2k-4k
 ]);
 
+/// Logistic-regression bias term.
 pub static BIAS: f32 = -0.50482284;
 
+/// Adaptation rate used when updating the running noise floor estimate.
 pub const NOISE_FLOOR_ALPHA: f32 = 0.01;

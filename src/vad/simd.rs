@@ -1,9 +1,10 @@
-// SIMD-optimized functions for VAD processing
+//! Internal SIMD helpers used by the filterbank implementation.
+
 use crate::vad::constants;
 use realfft::num_complex::Complex32;
 use wide::{f32x8, f32x16};
 
-// Apply Hanning window using SIMD in place
+/// Applies a Hann window to a frame in place using SIMD operations.
 pub fn apply_hanning_window_simd(frame: &mut [f32], hanning: &[f32]) {
     debug_assert_eq!(frame.len(), hanning.len());
     debug_assert!(
@@ -21,7 +22,7 @@ pub fn apply_hanning_window_simd(frame: &mut [f32], hanning: &[f32]) {
     });
 }
 
-// Compute Band energies using SIMD for the power calculation
+/// Computes per-band log energies from an FFT spectrum using SIMD operations.
 pub fn compute_band_energies_simd(spectrum: &[Complex32]) -> f32x8 {
     debug_assert!(spectrum.len() >= constants::ANALYSIS_BINS);
 

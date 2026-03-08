@@ -1,5 +1,7 @@
 /target
-/notebooks
+/notebooks/*
+!/notebooks/generate_report.py
+/docs/github-assets-smoke/
 .venv
 __pycache__
 *.pyc

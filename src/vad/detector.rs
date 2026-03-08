@@ -1,3 +1,5 @@
+//! Voice activity detector implementations and related configuration types.
+
 use crate::vad::{VadError, constants, filterbank};
 use realfft::num_complex::Complex32;
 use wide::f32x8;
@@ -369,11 +371,15 @@ impl VAD {
     }
 
     /// Creates a `VAD` with an explicit detection mode.
+    ///
+    /// Supported sample rates are 8000 Hz and 16000 Hz.
     pub fn with_mode(sample_rate: usize, mode: VADModes) -> Result<Self, VadError> {
         Self::build(sample_rate, mode_to_detection_config(mode))
     }
 
     /// Creates a `VAD` with custom detection parameters.
+    ///
+    /// Time-based parameters are rounded up to whole analysis frames.
     pub fn with_config(sample_rate: usize, config: VadConfig) -> Result<Self, VadError> {
         let filterbank = filterbank::FilterBank::new(sample_rate)?;
         let frame_size = filterbank.frame_size();
@@ -406,18 +412,25 @@ impl VAD {
         post_process_frame_labels(raw_labels, self.config)
     }
 
-    /// Returns one `bool` per frame indicating speech presence.
+    /// Returns one `bool` per complete frame indicating speech presence.
+    ///
+    /// Trailing samples that do not fill a full frame are ignored.
     pub fn detect_frames(&self, audio: &[f32]) -> Vec<bool> {
         self.run_frames(audio)
     }
 
     /// Returns one `bool` per sample indicating speech presence.
+    ///
+    /// For trailing samples that do not fill a full frame, the last computed
+    /// frame label is extended to cover the tail.
     pub fn detect(&self, audio: &[f32]) -> Vec<bool> {
         let frame_labels = self.run_frames(audio);
         frame_labels_to_sample_labels(&frame_labels, self.frame_size, audio.len())
     }
 
-    /// Returns `[start, end]` sample index pairs for each speech segment.
+    /// Returns `[start, end]` sample index pairs for each detected speech segment.
+    ///
+    /// Segment indices are sample offsets into `audio`.
     pub fn detect_segments(&self, audio: &[f32]) -> Vec<[usize; 2]> {
         let frame_labels = self.run_frames(audio);
         if frame_labels.is_empty() {
@@ -468,11 +481,15 @@ impl VadStateful {
     }
 
     /// Creates a `VadStateful` with an explicit detection mode.
+    ///
+    /// Supported sample rates are 8000 Hz and 16000 Hz.
     pub fn with_mode(sample_rate: usize, mode: VADModes) -> Result<Self, VadError> {
         Self::build(sample_rate, mode_to_detection_config(mode))
     }
 
     /// Creates a `VadStateful` with custom detection parameters.
+    ///
+    /// Time-based parameters are rounded up to whole analysis frames.
     pub fn with_config(sample_rate: usize, config: VadConfig) -> Result<Self, VadError> {
         let filterbank = filterbank::FilterBank::new(sample_rate)?;
         let frame_size = filterbank.frame_size();
@@ -515,6 +532,9 @@ impl VadStateful {
     }
 
     /// Resets internal state so the detector can be reused for a new stream.
+    ///
+    /// This clears the smoothing state, noise-floor estimate, and temporal
+    /// feature history accumulated from previous frames.
     pub fn reset_state(&mut self) {
         self.state = init_state();
         self.is_first_frame = true;
