@@ -5,7 +5,7 @@ description = "Extremely fast voice activity detection in Rust with Python bindi
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy>=2.4.2",
+    "numpy>=2.0.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
