@@ -1,12 +1,27 @@
 [project]
 name = "fast-vad"
 version = "0.1.0"
-description = "Add your description here"
+description = "Extremely fast voice activity detection in Rust with Python bindings and streaming mode support."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy>=2.4.2",
+    "numpy>=2.0.0",
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
+
+[project.urls]
+Homepage = "https://github.com/AtharvBhat/fast-vad"
+Repository = "https://github.com/AtharvBhat/fast-vad"
+Issues = "https://github.com/AtharvBhat/fast-vad/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -14,6 +29,7 @@ dev = [
     "ipython>=9.10.0",
     "matplotlib>=3.10.8",
     "notebook>=7.5.4",
+    "onnxruntime>=1.24.3",
     "pytest>=8.0.0",
     "pytest-benchmark>=4.0.0",
     "scikit-learn>=1.8.0",
@@ -34,3 +50,17 @@ addopts = "-v"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+sdist-generator = "cargo"
+exclude = [
+    ".github/**",
+    "bench_py/**",
+    "bench_rs/**",
+    "docs/**",
+    "notebooks/**",
+    "tests/**",
+    ".gitignore",
+    ".python-version",
+    "main.py",
+    "test-audio.raw",
+    "uv.lock",
+]

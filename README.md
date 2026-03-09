@@ -4,6 +4,63 @@ Extremely fast voice activity detection in Rust with Python bindings and streami
 
 Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 kHz and 256 samples at 8 kHz).
 
+If you are interested in benchmark comparisons, see [docs/README.md](docs/README.md).
+
+## Benchmarking
+
+Python benchmarks live in `bench_py/` and Rust benchmarks live in `bench_rs/`.
+
+```bash
+uv run pytest bench_py/bench_vad.py bench_py/bench_feature_extractor.py --benchmark-sort=mean --benchmark-group-by=group
+cargo bench --manifest-path bench_rs/Cargo.toml
+```
+
+## Architecture
+
+`fast_vad` is a small fixed-frame DSP pipeline with a hardcoded lightweight classifier.
+
+```text
+audio
+  -> 32 ms frames
+     - 16 kHz: 512 samples
+     - 8 kHz: 256 samples
+  -> Hann window
+  -> real FFT
+  -> 8 log-energy bands
+  -> feature engineering
+     - raw bands          (8)
+     - noise-normalized   (8)
+     - first deltas       (8)
+     - second deltas      (8)
+     = 32 total features
+  -> hardcoded logistic regression
+  -> threshold + smoothing
+  -> speech / silence labels
+```
+
+At a glance:
+
+- `VAD` (offline / batch) splits audio into 32 ms frames and uses `rayon` to process complete frames in parallel while extracting the 8-band features.
+- `VadStateful` (streaming) runs the same per-frame pipeline one frame at a time and reuses scratch buffers instead of paying thread-pool overhead.
+- The detector keeps a running 8-band noise floor, then derives 32 total features from each frame: raw band energies, noise-normalized energies, first-order deltas, and second-order deltas.
+- Classification is a tiny hardcoded logistic-regression-style model with fixed weights and bias compiled into the crate.
+- The final decision is shaped by simple temporal rules: thresholding, minimum speech length, minimum silence length, and hangover.
+- Hot loops are SIMD-accelerated with the `wide` crate for windowing, spectral power computation, band-energy math, and detector feature math.
+
+```text
+frame features (8 bands)
+    | raw
+    | raw - noise_floor
+    | delta
+    | delta2
+    v
+32 engineered features
+    v
+linear score + bias
+    v
+speech / silence
+```
+
 ## Build from source
 
 ### Python (with uv)
@@ -11,7 +68,7 @@ Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 k
 Requires [uv](https://docs.astral.sh/uv/) and a Rust toolchain.
 
 ```bash
-git clone https://github.com/youruser/fast-vad
+git clone https://github.com/AtharvBhat/fast-vad
 cd fast-vad
 uv venv
 uv pip install maturin

@@ -1,3 +1,5 @@
+//! Filterbank feature extraction used by the detector and Python bindings.
+
 use crate::vad::simd;
 use rayon::prelude::*;
 use realfft::RealFftPlanner;
@@ -5,7 +7,7 @@ use realfft::num_complex::Complex32;
 use std::sync::Arc;
 use wide::f32x8;
 
-/// Computes log-filterbank energies from raw audio frames.
+/// Computes 8-band log-energy features from raw audio frames.
 pub struct FilterBank {
     fft_forward: Arc<dyn realfft::RealToComplex<f32> + Send + Sync>,
     hann_window: Vec<f32>,
@@ -21,7 +23,7 @@ impl Default for FilterBank {
 impl FilterBank {
     /// Creates a `FilterBank` for the given sample rate.
     ///
-    /// Supported sample rates: 8000, 16000 Hz.
+    /// Supported sample rates are 8000 Hz and 16000 Hz.
     pub fn new(sample_rate: usize) -> Result<Self, super::VadError> {
         match sample_rate {
             16000 => {
@@ -95,9 +97,10 @@ impl FilterBank {
         Ok(simd::compute_band_energies_simd(fft_output))
     }
 
-    /// Computes log-filterbank energies for each complete frame in `input`.
+    /// Computes 8-band log-filterbank energies for each complete frame in `input`.
     ///
-    /// Drops any trailing samples that do not fill a complete frame.
+    /// The returned vector contains one [`f32x8`] per frame. Trailing samples
+    /// that do not fill a complete frame are ignored.
     pub fn compute_filterbank(&self, input: &[f32]) -> Vec<f32x8> {
         input
             .par_chunks_exact(self.frame_size)

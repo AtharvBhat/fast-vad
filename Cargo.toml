@@ -2,6 +2,23 @@
 name = "fast-vad"
 version = "0.1.0"
 edition = "2024"
+description = "Extremely fast voice activity detection in Rust with Python bindings and streaming mode support."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AtharvBhat/fast-vad"
+homepage = "https://github.com/AtharvBhat/fast-vad"
+documentation = "https://docs.rs/fast-vad"
+readme = "README.md"
+keywords = ["vad", "audio", "speech", "voice", "pyo3"]
+include = [
+    "/build.rs",
+    "/README.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/pyproject.toml",
+    "/fast_vad.pyi",
+    "/src/lib.rs",
+    "/src/vad/**",
+]
 
 [lib]
 name = "fast_vad"
@@ -10,19 +27,11 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 ndarray = "0.17.2"
 numpy = "0.28.0"
-pyo3 = { version = "0.28.2", features= ["extension-module"]}
+pyo3 = { version = "0.28.2", features= ["extension-module", "abi3-py311"]}
 rayon = "1.11.0"
 realfft = "3.5.0"
 thiserror = "2"
 wide = "1.1.1"
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "filterbank_bench"
-harness = false
-
-[[bench]]
-name = "vad_bench"
-harness = false
+[build-dependencies]
+pyo3-build-config = "0.28.2"

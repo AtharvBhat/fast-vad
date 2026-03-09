@@ -1,3 +1,27 @@
+#![warn(missing_docs)]
+//! Fast voice activity detection for 8 kHz and 16 kHz mono audio.
+//!
+//! This crate provides three main entry points:
+//! - [`VAD`] for batch detection over a full buffer.
+//! - [`VadStateful`] for streaming detection one frame at a time.
+//! - [`FilterBank`] for direct access to the underlying 8-band log-energy features.
+//!
+//! The detector operates on fixed 32 ms frames:
+//! - 512 samples at 16 kHz
+//! - 256 samples at 8 kHz
+//!
+//! # Example
+//!
+//! ```rust
+//! use fast_vad::{VAD, VADModes};
+//!
+//! let audio = vec![0.0f32; 16_000];
+//! let vad = VAD::with_mode(16_000, VADModes::Normal)?;
+//! let sample_labels = vad.detect(&audio);
+//! assert_eq!(sample_labels.len(), audio.len());
+//! # Ok::<(), fast_vad::VadError>(())
+//! ```
+
 use ndarray::Array2;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -5,6 +29,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyModule, PyType};
 use realfft::num_complex::Complex32;
 
+/// Core Rust implementation modules for detection and feature extraction.
 pub mod vad;
 
 pub use vad::VadError;

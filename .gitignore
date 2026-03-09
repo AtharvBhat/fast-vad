@@ -1,5 +1,9 @@
 /target
-/notebooks
+/bench_rs/target
+/bench_rs/Cargo.lock
+/notebooks/*
+!/notebooks/generate_report.py
+/docs/github-assets-smoke/
 .venv
 __pycache__
 *.pyc

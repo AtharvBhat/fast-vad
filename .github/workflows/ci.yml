@@ -1,0 +1,499 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "If true, run local release checks only. If false, also publish the rehearsal build to TestPyPI."
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate package versions
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path(".")
+          cargo_version = tomllib.loads(root.joinpath("Cargo.toml").read_text())["package"]["version"]
+          pyproject_version = tomllib.loads(root.joinpath("pyproject.toml").read_text())["project"]["version"]
+
+          if cargo_version != pyproject_version:
+              raise SystemExit(
+                  f"Version mismatch: Cargo.toml={cargo_version} pyproject.toml={pyproject_version}"
+              )
+
+          ref = os.environ.get("GITHUB_REF", "")
+          if ref.startswith("refs/tags/v"):
+              tag_version = ref.removeprefix("refs/tags/v")
+              if tag_version != cargo_version:
+                  raise SystemExit(
+                      f"Tag version {tag_version} does not match package version {cargo_version}"
+                  )
+
+          print(f"Validated package version {cargo_version}")
+          PY
+
+  test-rust:
+    name: Rust / ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04-x64
+            os: ubuntu-22.04
+          - name: ubuntu-24.04-x64
+            os: ubuntu-24.04
+          - name: ubuntu-24.04-arm64
+            os: ubuntu-24.04-arm
+          - name: macos-15-intel
+            os: macos-15-intel
+          - name: macos-15-arm64
+            os: macos-15
+          - name: windows-2022-x64
+            os: windows-2022
+          - name: windows-2025-x64
+            os: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+      - run: cargo test --all-features
+      - run: cargo clippy --all-features -- -D warnings
+
+  test-python:
+    name: Python / ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04-x64
+            os: ubuntu-24.04
+            python-version: "3.12"
+          - name: ubuntu-24.04-x64-py311
+            os: ubuntu-24.04
+            python-version: "3.11"
+          - name: ubuntu-24.04-arm64
+            os: ubuntu-24.04-arm
+            python-version: "3.12"
+          - name: macos-15-intel
+            os: macos-15-intel
+            python-version: "3.12"
+          - name: macos-15-arm64
+            os: macos-15
+            python-version: "3.12"
+          - name: windows-2025-x64
+            os: windows-2025
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip maturin numpy pytest
+      - name: Build wheel
+        run: maturin build --release --out dist
+      - name: Install built wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      - run: python -m pytest
+
+  build-wheels:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: [validate-release, test-rust, test-python]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            maturin_extra_args: -i python3.12
+            manylinux: "2_28"
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            maturin_extra_args: -i python3.12
+            manylinux: "2_28"
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            maturin_extra_args: ""
+            manylinux: "off"
+          - os: macos-15
+            target: aarch64-apple-darwin
+            maturin_extra_args: ""
+            manylinux: "off"
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            maturin_extra_args: ""
+            manylinux: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set TestPyPI version
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          match = re.search(r'(?m)^version = "([^"]+)"$', text)
+          if match is None:
+              raise SystemExit("Could not find project version in pyproject.toml")
+
+          base_version = match.group(1).split(".dev", 1)[0]
+          test_version = f"{base_version}.dev{os.environ['GITHUB_RUN_NUMBER']}{os.environ['GITHUB_RUN_ATTEMPT']}"
+          path.write_text(text[:match.start(1)] + test_version + text[match.end(1):])
+          print(f"Set TestPyPI package version to {test_version}")
+          PY
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist ${{ matrix.maturin_extra_args }}
+          manylinux: ${{ matrix.manylinux }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+
+  build-sdist:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: [validate-release, test-rust, test-python]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set TestPyPI version
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          match = re.search(r'(?m)^version = "([^"]+)"$', text)
+          if match is None:
+              raise SystemExit("Could not find project version in pyproject.toml")
+
+          base_version = match.group(1).split(".dev", 1)[0]
+          test_version = f"{base_version}.dev{os.environ['GITHUB_RUN_NUMBER']}{os.environ['GITHUB_RUN_ATTEMPT']}"
+          path.write_text(text[:match.start(1)] + test_version + text[match.end(1):])
+          print(f"Set TestPyPI package version to {test_version}")
+          PY
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  smoke-test-wheels:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: [build-wheels]
+    name: Wheel smoke / ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            artifact: wheels-x86_64-unknown-linux-gnu
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            artifact: wheels-aarch64-unknown-linux-gnu
+          - name: macos-x86_64
+            os: macos-15-intel
+            artifact: wheels-x86_64-apple-darwin
+          - name: macos-arm64
+            os: macos-15
+            artifact: wheels-aarch64-apple-darwin
+          - name: windows-x86_64
+            os: windows-2025
+            artifact: wheels-x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and smoke-test wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import fast_vad
+          import numpy as np
+
+          vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
+          print("Installed wheel from:", fast_vad.__file__)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
+          PY
+
+  smoke-test-sdist:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: [build-sdist]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and smoke-test sdist
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.tar.gz
+          python - <<'PY'
+          import fast_vad
+          import numpy as np
+
+          vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
+          print("Installed sdist build from:", fast_vad.__file__)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
+          PY
+
+  dry-run-checks:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify crates.io packaging
+        run: cargo publish --dry-run --allow-dirty
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - name: List built artifacts
+        run: |
+          echo "Built artifacts:"
+          ls -lh dist
+          echo
+          echo "Wheel count: $(find dist -maxdepth 1 -name '*.whl' | wc -l)"
+          echo "Sdist count: $(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)"
+
+  publish-testpypi:
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+    needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
+    runs-on: ubuntu-latest
+    environment: testpypi
+    steps:
+      - name: Check TestPyPI token
+        env:
+          PYPI_TEST_TOKEN: ${{ secrets.PYPI_TEST_TOKEN }}
+        run: |
+          if [ -z "$PYPI_TEST_TOKEN" ]; then
+            echo "PYPI_TEST_TOKEN is missing for this job."
+            echo "Add it as a secret in the repository or in the testpypi environment."
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          packages-dir: dist
+          password: ${{ secrets.PYPI_TEST_TOKEN }}
+          repository-url: https://test.pypi.org/legacy/
+
+  smoke-test-testpypi:
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+    needs: [publish-testpypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install published package from TestPyPI
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' | head -n1)"
+          version="$(basename "$wheel" | cut -d- -f2)"
+          python -m venv /tmp/testpypi-smoke
+          . /tmp/testpypi-smoke/bin/activate
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "fast-vad==$version"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Timed out waiting for fast-vad==$version to become available on TestPyPI"
+              exit 1
+            fi
+            echo "fast-vad==$version not visible on TestPyPI yet; retrying in 20s"
+            sleep 20
+          done
+          python - <<'PY'
+          import fast_vad
+          import numpy as np
+
+          vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
+          print("Installed from TestPyPI:", fast_vad.__file__)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
+          PY
+
+  publish-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  smoke-test-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install published package from PyPI
+        shell: bash
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          python -m venv /tmp/pypi-smoke
+          . /tmp/pypi-smoke/bin/activate
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install "fast-vad==$version"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Timed out waiting for fast-vad==$version to become available on PyPI"
+              exit 1
+            fi
+            echo "fast-vad==$version not visible on PyPI yet; retrying in 20s"
+            sleep 20
+          done
+          python - <<'PY'
+          import fast_vad
+          import numpy as np
+
+          vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
+          print("Installed from PyPI:", fast_vad.__file__)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
+          PY
+
+  publish-crates:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [smoke-test-pypi]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
