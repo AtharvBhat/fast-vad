@@ -301,7 +301,7 @@ jobs:
     if: github.ref == 'refs/heads/test-pypi'
     needs: [build-wheel-testpypi, build-sdist-testpypi]
     runs-on: ubuntu-latest
-    environment: release
+    environment: testpypi
     steps:
       - name: Check TestPyPI token
         env:
@@ -332,7 +332,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    environment: release
+    environment: testpypi
     steps:
       - name: Check TestPyPI token
         env:
