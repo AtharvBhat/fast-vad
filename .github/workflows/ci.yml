@@ -385,10 +385,16 @@ jobs:
             "fast-vad==$version"
           python - <<'PY'
           import fast_vad
+          import numpy as np
 
           vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
           print("Installed from TestPyPI:", fast_vad.__file__)
-          print("Frame size:", vad.frame_size)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
           PY
 
   smoke-test-testpypi-manual:
@@ -417,10 +423,16 @@ jobs:
             "fast-vad==$version"
           python - <<'PY'
           import fast_vad
+          import numpy as np
 
           vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
           print("Installed from TestPyPI:", fast_vad.__file__)
-          print("Frame size:", vad.frame_size)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
           PY
 
   publish-pypi:
