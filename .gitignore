@@ -1,4 +1,6 @@
 /target
+/Cargo.lock
+/uv.lock
 /bench_rs/target
 /bench_rs/Cargo.lock
 /notebooks/*
@@ -11,4 +13,3 @@ __pycache__
 .benchmark
 .claude
 .pytest_cache
-.gitignore

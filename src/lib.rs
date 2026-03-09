@@ -340,6 +340,7 @@ impl PyVadStateful {
 
 #[pymodule]
 fn fast_vad(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<FeatureExtractor>()?;
     m.add_class::<PyVAD>()?;
     m.add_class::<PyVadStateful>()?;

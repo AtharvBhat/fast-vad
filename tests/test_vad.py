@@ -1,5 +1,7 @@
 import numpy as np
 import pytest
+import tomllib
+from pathlib import Path
 
 import fast_vad
 
@@ -40,6 +42,11 @@ def test_mode_namespace_values():
     assert fast_vad.mode.permissive == 0
     assert fast_vad.mode.normal == 1
     assert fast_vad.mode.aggressive == 2
+
+
+def test_module_version_matches_pyproject():
+    project_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+    assert fast_vad.__version__ == project_version
 
 
 # ── Error handling: bad sample rate ───────────────────────────────────────────
