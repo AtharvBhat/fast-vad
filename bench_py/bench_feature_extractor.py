@@ -1,14 +1,14 @@
 """
 Criterion-style Python benchmark for FeatureExtractor using pytest-benchmark.
 
-Mirrors benches/filterbank_bench.rs:
+Mirrors bench_rs/benches/filterbank_bench.rs:
   - Same audio durations: 100ms → 1hr
   - Same LCG seed (reproducible input)
   - Throughput reported in Gelem/s, matching Criterion's Throughput::Elements
   - Warmup + statistical summary (mean, stddev, min, max, outliers)
 
 Run with:
-    uv run benches/bench_feature_extractor.py
+    uv run bench_py/bench_feature_extractor.py
 """
 
 import numpy as np

@@ -2,7 +2,7 @@
 Python benchmark for VAD using pytest-benchmark.
 
 Run with:
-    uv run pytest benches/bench_vad.py --benchmark-sort=mean --benchmark-group-by=group
+    uv run pytest bench_py/bench_vad.py --benchmark-sort=mean --benchmark-group-by=group
 """
 
 import numpy as np

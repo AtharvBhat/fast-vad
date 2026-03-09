@@ -53,8 +53,8 @@ features = ["pyo3/extension-module"]
 sdist-generator = "cargo"
 exclude = [
     ".github/**",
-    "benches/**",
-    "benchmarks/**",
+    "bench_py/**",
+    "bench_rs/**",
     "docs/**",
     "notebooks/**",
     "tests/**",

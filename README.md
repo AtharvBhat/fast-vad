@@ -6,6 +6,15 @@ Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 k
 
 If you are interested in benchmark comparisons, see [docs/README.md](docs/README.md).
 
+## Benchmarking
+
+Python benchmarks live in `bench_py/` and Rust benchmarks live in `bench_rs/`.
+
+```bash
+uv run pytest bench_py/bench_vad.py bench_py/bench_feature_extractor.py --benchmark-sort=mean --benchmark-group-by=group
+cargo bench --manifest-path bench_rs/Cargo.toml
+```
+
 ## Architecture
 
 `fast_vad` is a small fixed-frame DSP pipeline with a hardcoded lightweight classifier.
