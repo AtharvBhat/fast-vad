@@ -14,6 +14,10 @@ on:
         default: true
         type: boolean
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -135,15 +139,15 @@ jobs:
             target: aarch64-unknown-linux-gnu
             maturin_extra_args: -i python3.12
             manylinux: "2_28"
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             maturin_extra_args: ""
             manylinux: "off"
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
             maturin_extra_args: ""
             manylinux: "off"
-          - os: windows-latest
+          - os: windows-2025
             target: x86_64-pc-windows-msvc
             maturin_extra_args: ""
             manylinux: "off"
@@ -187,44 +191,6 @@ jobs:
           name: wheels-${{ matrix.target }}
           path: dist/*.whl
 
-  build-wheel-testpypi:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
-    needs: [validate-release, test-rust, test-python]
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Set TestPyPI version
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          import pathlib
-          import re
-
-          path = pathlib.Path("pyproject.toml")
-          text = path.read_text()
-          match = re.search(r'(?m)^version = "([^"]+)"$', text)
-          if match is None:
-              raise SystemExit("Could not find project version in pyproject.toml")
-
-          base_version = match.group(1).split(".dev", 1)[0]
-          test_version = f"{base_version}.dev{os.environ['GITHUB_RUN_NUMBER']}{os.environ['GITHUB_RUN_ATTEMPT']}"
-          path.write_text(text[:match.start(1)] + test_version + text[match.end(1):])
-          print(f"Set TestPyPI package version to {test_version}")
-          PY
-      - uses: PyO3/maturin-action@v1
-        with:
-          target: x86_64-unknown-linux-gnu
-          args: --release --out dist -i python3.12
-          manylinux: "2_28"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-x86_64-unknown-linux-gnu
-          path: dist/*.whl
-
   build-sdist:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/test-pypi'
     needs: [validate-release, test-rust, test-python]
@@ -236,43 +202,6 @@ jobs:
           python-version: "3.12"
       - name: Set TestPyPI version
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os
-          import pathlib
-          import re
-
-          path = pathlib.Path("pyproject.toml")
-          text = path.read_text()
-          match = re.search(r'(?m)^version = "([^"]+)"$', text)
-          if match is None:
-              raise SystemExit("Could not find project version in pyproject.toml")
-
-          base_version = match.group(1).split(".dev", 1)[0]
-          test_version = f"{base_version}.dev{os.environ['GITHUB_RUN_NUMBER']}{os.environ['GITHUB_RUN_ATTEMPT']}"
-          path.write_text(text[:match.start(1)] + test_version + text[match.end(1):])
-          print(f"Set TestPyPI package version to {test_version}")
-          PY
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
-          path: dist/*.tar.gz
-
-  build-sdist-testpypi:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
-    needs: [validate-release, test-rust, test-python]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Set TestPyPI version
         shell: bash
         run: |
           python - <<'PY'
@@ -411,37 +340,6 @@ jobs:
 
   publish-testpypi:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
-    needs: [build-wheel-testpypi, build-sdist-testpypi]
-    runs-on: ubuntu-latest
-    environment: testpypi
-    steps:
-      - name: Check TestPyPI token
-        env:
-          PYPI_TEST_TOKEN: ${{ secrets.PYPI_TEST_TOKEN }}
-        run: |
-          if [ -z "$PYPI_TEST_TOKEN" ]; then
-            echo "PYPI_TEST_TOKEN is missing for this job."
-            echo "Add it as a secret in the repository or in the testpypi environment."
-            exit 1
-          fi
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdist
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          packages-dir: dist
-          password: ${{ secrets.PYPI_TEST_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-
-  publish-testpypi-manual:
-    if: false
     needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
     runs-on: ubuntu-latest
     environment: testpypi
@@ -474,54 +372,6 @@ jobs:
   smoke-test-testpypi:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
     needs: [publish-testpypi]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install published package from TestPyPI
-        run: |
-          wheel="$(find dist -maxdepth 1 -name '*.whl' | head -n1)"
-          version="$(basename "$wheel" | cut -d- -f2)"
-          python -m venv /tmp/testpypi-smoke
-          . /tmp/testpypi-smoke/bin/activate
-          python -m pip install --upgrade pip
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if python -m pip install \
-              --index-url https://test.pypi.org/simple/ \
-              --extra-index-url https://pypi.org/simple/ \
-              "fast-vad==$version"; then
-              break
-            fi
-            if [ "$attempt" -eq 10 ]; then
-              echo "Timed out waiting for fast-vad==$version to become available on TestPyPI"
-              exit 1
-            fi
-            echo "fast-vad==$version not visible on TestPyPI yet; retrying in 20s"
-            sleep 20
-          done
-          python - <<'PY'
-          import fast_vad
-          import numpy as np
-
-          vad = fast_vad.VAD(16000)
-          stateful = fast_vad.VadStateful(16000)
-          labels = vad.detect(np.zeros(16000, dtype=np.float32))
-          assert len(labels) == 16000
-          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
-          print("Installed from TestPyPI:", fast_vad.__file__)
-          print("Batch labels:", len(labels))
-          print("Streaming frame size:", stateful.frame_size)
-          PY
-
-  smoke-test-testpypi-manual:
-    if: false
-    needs: [publish-testpypi-manual]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
