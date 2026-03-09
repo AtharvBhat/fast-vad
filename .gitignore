@@ -1,4 +1,6 @@
 /target
+/benchmarks/target
+/benchmarks/Cargo.lock
 /notebooks/*
 !/notebooks/generate_report.py
 /docs/github-assets-smoke/

@@ -54,6 +54,7 @@ sdist-generator = "cargo"
 exclude = [
     ".github/**",
     "benches/**",
+    "benchmarks/**",
     "docs/**",
     "notebooks/**",
     "tests/**",

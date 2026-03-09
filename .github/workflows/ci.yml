@@ -2,14 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, test-pypi]
+    branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "If true, build and verify release artifacts without publishing. If false, publish Python artifacts to TestPyPI."
+        description: "If true, run local release checks only. If false, also publish the rehearsal build to TestPyPI."
         required: false
         default: true
         type: boolean
@@ -124,7 +124,7 @@ jobs:
       - run: python -m pytest
 
   build-wheels:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/test-pypi'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: [validate-release, test-rust, test-python]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -162,7 +162,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Set TestPyPI version
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
         shell: bash
         run: |
           python - <<'PY'
@@ -192,7 +192,7 @@ jobs:
           path: dist/*.whl
 
   build-sdist:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/test-pypi'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: [validate-release, test-rust, test-python]
     runs-on: ubuntu-latest
     steps:
@@ -201,7 +201,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Set TestPyPI version
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
         shell: bash
         run: |
           python - <<'PY'
@@ -230,7 +230,7 @@ jobs:
           path: dist/*.tar.gz
 
   smoke-test-wheels:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/test-pypi'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: [build-wheels]
     name: Wheel smoke / ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -281,7 +281,7 @@ jobs:
           PY
 
   smoke-test-sdist:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/test-pypi'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     needs: [build-sdist]
     runs-on: ubuntu-24.04
     steps:
@@ -313,7 +313,7 @@ jobs:
           PY
 
   dry-run-checks:
-    if: github.ref == 'refs/heads/test-pypi' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
     runs-on: ubuntu-latest
     steps:
@@ -339,7 +339,7 @@ jobs:
           echo "Sdist count: $(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)"
 
   publish-testpypi:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
     needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
     runs-on: ubuntu-latest
     environment: testpypi
@@ -370,7 +370,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   smoke-test-testpypi:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
     needs: [publish-testpypi]
     runs-on: ubuntu-latest
     steps:
@@ -438,9 +438,49 @@ jobs:
         with:
           packages-dir: dist
 
+  smoke-test-pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-pypi]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install published package from PyPI
+        shell: bash
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          python -m venv /tmp/pypi-smoke
+          . /tmp/pypi-smoke/bin/activate
+          python -m pip install --upgrade pip
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install "fast-vad==$version"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Timed out waiting for fast-vad==$version to become available on PyPI"
+              exit 1
+            fi
+            echo "fast-vad==$version not visible on PyPI yet; retrying in 20s"
+            sleep 20
+          done
+          python - <<'PY'
+          import fast_vad
+          import numpy as np
+
+          vad = fast_vad.VAD(16000)
+          stateful = fast_vad.VadStateful(16000)
+          labels = vad.detect(np.zeros(16000, dtype=np.float32))
+          assert len(labels) == 16000
+          _ = stateful.detect_frame(np.zeros(stateful.frame_size, dtype=np.float32))
+          print("Installed from PyPI:", fast_vad.__file__)
+          print("Batch labels:", len(labels))
+          print("Streaming frame size:", stateful.frame_size)
+          PY
+
   publish-crates:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-wheels, build-sdist, smoke-test-wheels, smoke-test-sdist]
+    needs: [smoke-test-pypi]
     runs-on: ubuntu-latest
     environment: release
     steps:
