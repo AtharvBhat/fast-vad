@@ -379,10 +379,20 @@ jobs:
           python -m venv /tmp/testpypi-smoke
           . /tmp/testpypi-smoke/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install \
-            --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            "fast-vad==$version"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "fast-vad==$version"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Timed out waiting for fast-vad==$version to become available on TestPyPI"
+              exit 1
+            fi
+            echo "fast-vad==$version not visible on TestPyPI yet; retrying in 20s"
+            sleep 20
+          done
           python - <<'PY'
           import fast_vad
           import numpy as np
@@ -417,10 +427,20 @@ jobs:
           python -m venv /tmp/testpypi-smoke
           . /tmp/testpypi-smoke/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install \
-            --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            "fast-vad==$version"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if python -m pip install \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "fast-vad==$version"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "Timed out waiting for fast-vad==$version to become available on TestPyPI"
+              exit 1
+            fi
+            echo "fast-vad==$version not visible on TestPyPI yet; retrying in 20s"
+            sleep 20
+          done
           python - <<'PY'
           import fast_vad
           import numpy as np
