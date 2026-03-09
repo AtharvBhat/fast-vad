@@ -1,6 +1,8 @@
 import numpy as np
 from numpy.typing import NDArray
 
+__version__: str
+
 class FeatureExtractor:
     """Computes log-filterbank features from raw audio."""
 

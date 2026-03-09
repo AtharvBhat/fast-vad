@@ -59,8 +59,4 @@ exclude = [
     "notebooks/**",
     "tests/**",
     ".gitignore",
-    ".python-version",
-    "main.py",
-    "test-audio.raw",
-    "uv.lock",
 ]
