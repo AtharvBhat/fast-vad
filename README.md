@@ -15,6 +15,26 @@ uv run pytest bench_py/bench_vad.py bench_py/bench_feature_extractor.py --benchm
 cargo bench --manifest-path bench_rs/Cargo.toml
 ```
 
+## Install
+
+### Python
+
+```bash
+pip install fast-vad
+```
+
+Or with `uv`:
+
+```bash
+uv add fast-vad
+```
+
+### Rust
+
+```bash
+cargo add fast-vad
+```
+
 ## Architecture
 
 `fast_vad` is a small fixed-frame DSP pipeline with a hardcoded lightweight classifier.
