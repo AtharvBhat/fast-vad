@@ -4,6 +4,7 @@ use crate::vad::simd;
 use rayon::prelude::*;
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex32;
+use std::fmt;
 use std::sync::Arc;
 use wide::f32x8;
 
@@ -131,6 +132,20 @@ fn compute_hann_window(size: usize) -> Vec<f32> {
         *sample = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * n as f32 / size as f32).cos());
     }
     window
+}
+
+impl fmt::Display for FilterBank {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sample_rate = match self.frame_size {
+            512 => 16000,
+            256 => 8000,
+            _ => 0,
+        };
+        f.debug_struct("FilterBank")
+            .field("sample_rate", &format_args!("{} Hz", sample_rate))
+            .field("frame_size", &format_args!("{} samples", self.frame_size))
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -550,5 +565,15 @@ mod tests {
             e0[2],
             e90[2]
         );
+    }
+
+    #[test]
+    fn filterbank_display_contains_expected_fields() {
+        let fb = FilterBank::new(16000).unwrap();
+        let s = format!("{}", fb);
+        assert!(s.contains("sample_rate"));
+        assert!(s.contains("16000 Hz"));
+        assert!(s.contains("frame_size"));
+        assert!(s.contains("512 samples"));
     }
 }

@@ -172,7 +172,16 @@ impl FeatureExtractor {
     }
 
     fn __repr__(&self) -> String {
-        format!("FeatureExtractor(frame_size={})", self.frame_size())
+        let sample_rate = match self.feature_extractor.frame_size() {
+            512 => 16000,
+            256 => 8000,
+            _ => 0,
+        };
+        format!("FeatureExtractor(sample_rate={})", sample_rate)
+    }
+
+    fn __str__(&self) -> String {
+        format!("{}", self.feature_extractor)
     }
 }
 
@@ -233,9 +242,10 @@ impl PyVAD {
         &self,
         py: Python<'py>,
         audio: PyReadonlyArray1<'py, f32>,
-    ) -> PyResult<Vec<bool>> {
+    ) -> PyResult<Bound<'py, PyArray1<bool>>> {
         let audio = audio.as_slice()?;
-        Ok(py.detach(|| self.vad.detect(audio)))
+        let labels = py.detach(|| self.vad.detect(audio));
+        Ok(PyArray1::from_vec(py, labels))
     }
 
     /// Returns one `bool` per frame indicating speech presence.
@@ -243,9 +253,10 @@ impl PyVAD {
         &self,
         py: Python<'py>,
         audio: PyReadonlyArray1<'py, f32>,
-    ) -> PyResult<Vec<bool>> {
+    ) -> PyResult<Bound<'py, PyArray1<bool>>> {
         let audio = audio.as_slice()?;
-        Ok(py.detach(|| self.vad.detect_frames(audio)))
+        let labels = py.detach(|| self.vad.detect_frames(audio));
+        Ok(PyArray1::from_vec(py, labels))
     }
 
     /// Returns a `(N, 2)` uint64 array of `[start, end]` sample indices for each speech segment.
@@ -260,12 +271,18 @@ impl PyVAD {
     }
 
     fn __repr__(&self) -> String {
-        let sample_rate = match self.vad.frame_size() {
-            512 => 16000,
-            256 => 8000,
-            _ => 0, // Should never happen
-        };
-        format!("VAD(sample_rate={})", sample_rate)
+        format!(
+            "VAD(sample_rate={}, threshold_probability={:.2}, min_speech_ms={}, min_silence_ms={}, hangover_ms={})",
+            self.vad.sample_rate(),
+            self.vad.threshold_probability(),
+            self.vad.min_speech_ms(),
+            self.vad.min_silence_ms(),
+            self.vad.hangover_ms(),
+        )
+    }
+
+    fn __str__(&self) -> String {
+        format!("{}", self.vad)
     }
 }
 
@@ -351,12 +368,18 @@ impl PyVadStateful {
     }
 
     fn __repr__(&self) -> String {
-        let sample_rate = match self.frame_size() {
-            512 => 16000,
-            256 => 8000,
-            _ => 0, // Should never happen
-        };
-        format!("VadStateful(sample_rate={})", sample_rate)
+        format!(
+            "VadStateful(sample_rate={}, threshold_probability={:.2}, min_speech_ms={}, min_silence_ms={}, hangover_ms={})",
+            self.vad.sample_rate(),
+            self.vad.threshold_probability(),
+            self.vad.min_speech_ms(),
+            self.vad.min_silence_ms(),
+            self.vad.hangover_ms(),
+        )
+    }
+
+    fn __str__(&self) -> String {
+        format!("{}", self.vad)
     }
 }
 
