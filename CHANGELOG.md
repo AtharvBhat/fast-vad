@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Added __repr__ and Display traits for python and rust crates
--  `detect()` and `detect_frames()` and `detect_segments()` now return numpy arrays. This is a breaking change, Hence the version bump.
+-  `detect()` and `detect_frames()` now return numpy arrays. This is a breaking change, Hence the version bump.
 
 ## [0.1.1] - 2026-03-09
 
