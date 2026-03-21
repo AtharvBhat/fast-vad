@@ -2,6 +2,7 @@
 
 use crate::vad::{VadError, constants, filterbank};
 use realfft::num_complex::Complex32;
+use std::fmt;
 use wide::f32x8;
 
 const PROBABILITY_EPSILON: f32 = 1e-6;
@@ -105,6 +106,22 @@ fn clamp_probability(probability: f32) -> f32 {
 fn probability_to_logit(probability: f32) -> f32 {
     let p = clamp_probability(probability);
     (p / (1.0 - p)).ln()
+}
+
+fn frames_to_ms(frames: usize, frame_size: usize, sample_rate: usize) -> usize {
+    frames * frame_size * MS_PER_SECOND / sample_rate
+}
+
+fn logit_to_probability(logit: f32) -> f32 {
+    1.0 / (1.0 + (-logit).exp())
+}
+
+fn frame_size_to_sample_rate(frame_size: usize) -> usize {
+    match frame_size {
+        512 => 16000,
+        256 => 8000,
+        _ => 0,
+    }
 }
 
 fn ms_to_frames(ms: usize, sample_rate: usize, frame_size: usize) -> usize {
@@ -396,6 +413,43 @@ impl VAD {
         self.frame_size
     }
 
+    /// Audio sample rate in Hz.
+    pub fn sample_rate(&self) -> usize {
+        frame_size_to_sample_rate(self.frame_size)
+    }
+
+    /// Speech probability threshold in (0, 1).
+    pub fn threshold_probability(&self) -> f32 {
+        logit_to_probability(self.config.logit_threshold)
+    }
+
+    /// Minimum speech run to confirm onset (milliseconds).
+    pub fn min_speech_ms(&self) -> usize {
+        frames_to_ms(
+            self.config.min_speech_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
+    /// Minimum silence run to confirm offset (milliseconds).
+    pub fn min_silence_ms(&self) -> usize {
+        frames_to_ms(
+            self.config.min_silence_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
+    /// Extra speech extension after voiced region ends (milliseconds).
+    pub fn hangover_ms(&self) -> usize {
+        frames_to_ms(
+            self.config.hangover_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
     fn run_frames(&self, audio: &[f32]) -> Vec<bool> {
         let features = self.filterbank.compute_filterbank(audio);
         if features.is_empty() {
@@ -437,6 +491,27 @@ impl VAD {
             return vec![];
         }
         frame_labels_to_segments(&frame_labels, self.frame_size, audio.len())
+    }
+}
+
+impl fmt::Display for VAD {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VAD")
+            .field("sample_rate", &format_args!("{} Hz", self.sample_rate()))
+            .field(
+                "threshold_probability",
+                &format_args!("{:.4}", self.threshold_probability()),
+            )
+            .field(
+                "min_speech_ms",
+                &format_args!("{} ms", self.min_speech_ms()),
+            )
+            .field(
+                "min_silence_ms",
+                &format_args!("{} ms", self.min_silence_ms()),
+            )
+            .field("hangover_ms", &format_args!("{} ms", self.hangover_ms()))
+            .finish()
     }
 }
 
@@ -502,6 +577,43 @@ impl VadStateful {
         self.frame_size
     }
 
+    /// Audio sample rate in Hz.
+    pub fn sample_rate(&self) -> usize {
+        frame_size_to_sample_rate(self.frame_size)
+    }
+
+    /// Speech probability threshold in (0, 1).
+    pub fn threshold_probability(&self) -> f32 {
+        logit_to_probability(self.smoother.config.logit_threshold)
+    }
+
+    /// Minimum speech run to confirm onset (milliseconds).
+    pub fn min_speech_ms(&self) -> usize {
+        frames_to_ms(
+            self.smoother.config.min_speech_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
+    /// Minimum silence run to confirm offset (milliseconds).
+    pub fn min_silence_ms(&self) -> usize {
+        frames_to_ms(
+            self.smoother.config.min_silence_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
+    /// Extra speech extension after voiced region ends (milliseconds).
+    pub fn hangover_ms(&self) -> usize {
+        frames_to_ms(
+            self.smoother.config.hangover_frames,
+            self.frame_size,
+            self.sample_rate(),
+        )
+    }
+
     /// Processes a single frame and returns whether speech is active.
     ///
     /// `frame` must have exactly `frame_size()` samples.
@@ -539,6 +651,27 @@ impl VadStateful {
         self.state = init_state();
         self.is_first_frame = true;
         self.smoother.reset();
+    }
+}
+
+impl fmt::Display for VadStateful {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VadStateful")
+            .field("sample_rate", &format_args!("{} Hz", self.sample_rate()))
+            .field(
+                "threshold_probability",
+                &format_args!("{:.4}", self.threshold_probability()),
+            )
+            .field(
+                "min_speech_ms",
+                &format_args!("{} ms", self.min_speech_ms()),
+            )
+            .field(
+                "min_silence_ms",
+                &format_args!("{} ms", self.min_silence_ms()),
+            )
+            .field("hangover_ms", &format_args!("{} ms", self.hangover_ms()))
+            .finish()
     }
 }
 
@@ -849,5 +982,29 @@ mod tests {
                 true, false,
             ]
         );
+    }
+
+    #[test]
+    fn vad_display_contains_expected_fields() {
+        let vad = VAD::new(16000).unwrap();
+        let s = format!("{}", vad);
+        assert!(s.contains("sample_rate"));
+        assert!(s.contains("16000 Hz"));
+        assert!(s.contains("threshold_probability"));
+        assert!(s.contains("min_speech_ms"));
+        assert!(s.contains("min_silence_ms"));
+        assert!(s.contains("hangover_ms"));
+    }
+
+    #[test]
+    fn vad_stateful_display_contains_expected_fields() {
+        let vad = VadStateful::new(8000).unwrap();
+        let s = format!("{}", vad);
+        assert!(s.contains("sample_rate"));
+        assert!(s.contains("8000 Hz"));
+        assert!(s.contains("threshold_probability"));
+        assert!(s.contains("min_speech_ms"));
+        assert!(s.contains("min_silence_ms"));
+        assert!(s.contains("hangover_ms"));
     }
 }

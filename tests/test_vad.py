@@ -98,20 +98,20 @@ def test_stateful_detect_frame_empty_raises():
 
 # ── detect output shape and type ──────────────────────────────────────────────
 
-def test_detect_returns_list_of_bools(vad_16k):
+def test_detect_returns_numpy_array_of_bools(vad_16k):
     audio = make_audio(FRAME_SIZE_16K * 2)
     result = vad_16k.detect(audio)
-    assert isinstance(result, list)
-    assert len(result) == len(audio)
-    assert all(isinstance(v, bool) for v in result)
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.bool_
+    assert result.shape == (len(audio),)
 
 
-def test_detect_frames_returns_list_of_bools(vad_16k):
+def test_detect_frames_returns_numpy_array_of_bools(vad_16k):
     audio = make_audio(FRAME_SIZE_16K * 3)
     result = vad_16k.detect_frames(audio)
-    assert isinstance(result, list)
-    assert len(result) == 3
-    assert all(isinstance(v, bool) for v in result)
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.bool_
+    assert result.shape == (3,)
 
 
 def test_detect_segments_returns_numpy_array(vad_16k):
@@ -143,19 +143,19 @@ def test_detect_sample_labels_carry_tail_from_last_frame(vad_16k):
     for i, label in enumerate(frame_labels):
         start = i * FRAME_SIZE_16K
         end = start + FRAME_SIZE_16K
-        assert all(v == label for v in sample_labels[start:end])
+        assert (sample_labels[start:end] == label).all()
 
     tail_start = len(frame_labels) * FRAME_SIZE_16K
-    assert all(v == frame_labels[-1] for v in sample_labels[tail_start:])
+    assert (sample_labels[tail_start:] == frame_labels[-1]).all()
 
 
 def test_detect_short_audio_returns_all_false(vad_16k):
     audio = make_audio(FRAME_SIZE_16K - 1, seed=2)
-    assert vad_16k.detect_frames(audio) == []
+    assert vad_16k.detect_frames(audio).size == 0
 
     sample_labels = vad_16k.detect(audio)
     assert len(sample_labels) == len(audio)
-    assert all(v is False for v in sample_labels)
+    assert not sample_labels.any()
 
     segments = vad_16k.detect_segments(audio)
     assert segments.shape == (0, 2)
@@ -176,7 +176,7 @@ def test_detect_segments_reconstruct_sample_labels(vad_16k):
             reconstructed[idx] = True
         previous_end = end
 
-    assert reconstructed == sample_labels
+    assert reconstructed == sample_labels.tolist()
 
 
 def test_detect_segments_values_are_valid_indices(vad_16k):
@@ -201,8 +201,8 @@ def test_with_config_matches_with_mode_16k(mode):
     vad_mode = fast_vad.VAD.with_mode(SAMPLE_RATE_16K, mode)
     vad_cfg = fast_vad.VAD.with_config(SAMPLE_RATE_16K, p, min_speech_ms, min_silence_ms, hangover_ms)
 
-    assert vad_mode.detect_frames(audio) == vad_cfg.detect_frames(audio)
-    assert vad_mode.detect(audio) == vad_cfg.detect(audio)
+    assert np.array_equal(vad_mode.detect_frames(audio), vad_cfg.detect_frames(audio))
+    assert np.array_equal(vad_mode.detect(audio), vad_cfg.detect(audio))
     assert np.array_equal(vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio))
 
 
@@ -218,8 +218,8 @@ def test_with_config_matches_with_mode_8k(mode):
     vad_mode = fast_vad.VAD.with_mode(SAMPLE_RATE_8K, mode)
     vad_cfg = fast_vad.VAD.with_config(SAMPLE_RATE_8K, p, min_speech_ms, min_silence_ms, hangover_ms)
 
-    assert vad_mode.detect_frames(audio) == vad_cfg.detect_frames(audio)
-    assert vad_mode.detect(audio) == vad_cfg.detect(audio)
+    assert np.array_equal(vad_mode.detect_frames(audio), vad_cfg.detect_frames(audio))
+    assert np.array_equal(vad_mode.detect(audio), vad_cfg.detect(audio))
     assert np.array_equal(vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio))
 
 

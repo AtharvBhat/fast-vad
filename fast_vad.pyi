@@ -127,7 +127,7 @@ class VAD:
         """
         ...
 
-    def detect(self, audio: NDArray[np.float32]) -> list[bool]:
+    def detect(self, audio: NDArray[np.float32]) -> NDArray[np.bool_]:
         """
         Return one bool per sample indicating speech presence.
 
@@ -135,11 +135,11 @@ class VAD:
             audio: 1-D float32 array of audio samples.
 
         Returns:
-            List of booleans, one per sample.
+            Array of booleans, one per sample.
         """
         ...
 
-    def detect_frames(self, audio: NDArray[np.float32]) -> list[bool]:
+    def detect_frames(self, audio: NDArray[np.float32]) -> NDArray[np.bool_]:
         """
         Return one bool per frame indicating speech presence.
 
