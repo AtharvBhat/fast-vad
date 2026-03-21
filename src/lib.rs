@@ -170,6 +170,10 @@ impl FeatureExtractor {
         }
         Ok(PyArray2::from_owned_array(py, arr))
     }
+
+    fn __repr__(&self) -> String {
+        format!("FeatureExtractor(frame_size={})", self.frame_size())
+    }
 }
 
 /// Batch voice activity detector.
@@ -254,6 +258,15 @@ impl PyVAD {
         let segments = py.detach(|| self.vad.detect_segments(audio));
         Ok(segments_to_array(py, segments))
     }
+
+    fn __repr__(&self) -> String {
+        let sample_rate = match self.vad.frame_size() {
+            512 => 16000,
+            256 => 8000,
+            _ => 0, // Should never happen
+        };
+        format!("VAD(sample_rate={})", sample_rate)
+    }
 }
 
 /// Streaming voice activity detector that processes one frame at a time.
@@ -335,6 +348,15 @@ impl PyVadStateful {
     /// Resets internal state so the detector can be reused for a new stream.
     fn reset_state(&mut self) {
         self.vad.reset_state();
+    }
+
+    fn __repr__(&self) -> String {
+        let sample_rate = match self.frame_size() {
+            512 => 16000,
+            256 => 8000,
+            _ => 0, // Should never happen
+        };
+        format!("VadStateful(sample_rate={})", sample_rate)
     }
 }
 
