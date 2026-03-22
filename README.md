@@ -1,11 +1,8 @@
 # fast-vad
 
-Extremely fast voice activity detection in Rust with Python bindings and streaming mode support. Significantly faster than WebRTC VAD and orders of magnitude faster than Silero ONNX — see [benchmark comparisons](docs/README.md).
+Extremely fast voice activity detection in Rust with Python bindings and streaming mode support. Significantly faster than WebRTC VAD and orders of magnitude faster than Silero ONNX. See [benchmark comparisons](docs/README.md).
 
-Supports 16 kHz and 8 kHz audio. Fixed frame width of 32 ms (512 samples at 16 kHz and 256 samples at 8 kHz).
-
-If you are interested in benchmark comparisons, see [docs/README.md](docs/README.md).
-
+Supports 16 kHz and 8 kHz sample rates.
 ## Benchmarking
 
 ```bash
@@ -48,11 +45,9 @@ Requires [uv](https://docs.astral.sh/uv/) and a Rust toolchain.
 git clone https://github.com/AtharvBhat/fast-vad
 cd fast-vad
 uv venv
-uv pip install maturin
+uv tool install maturin
 uv run maturin develop --release
 ```
-
-The package is then importable inside the virtual environment.
 
 ### Rust
 
@@ -60,17 +55,9 @@ The package is then importable inside the virtual environment.
 cargo build --release
 ```
 
-Add as a dependency in another crate:
-
-```toml
-[dependencies]
-fast-vad = { path = "/path/to/fast-vad" }
-```
-
 ## Python usage
 
-Config is set at construction time. `VAD()` and `VadStateful()` default to Normal
-mode; use `with_mode` or `with_config` to customise.
+Fast vad comes with a few modes.`VAD()` and `VadStateful()` default to `fast_vad.mode.normal` for offline and streaming mode respectively. To customize parameters use `with_mode` or `with_config` for even finer control.
 
 ```python
 import numpy as np
@@ -84,7 +71,7 @@ assert sr in (8000, 16000)
 vad = fast_vad.VAD(sr)
 
 # Explicit mode
-vad = fast_vad.VAD.with_mode(sr, fast_vad.mode.aggressive)
+vad = fast_vad.VAD.with_mode(sr, fast_vad.mode.aggressive) # choose permissive, normal or aggressive 
 
 # Custom parameters
 vad = fast_vad.VAD.with_config(
@@ -129,6 +116,8 @@ vad.reset_state()  # reuse for another stream
 ```
 
 ### Feature extraction
+
+You can also use fast vad as s feature extractor. This will return a 8 log energy band features per frame.
 
 ```python
 fe = fast_vad.FeatureExtractor(sr)
