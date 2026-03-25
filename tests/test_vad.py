@@ -14,7 +14,7 @@ FRAME_SIZE_8K = 256
 # (threshold_probability, min_speech_ms, min_silence_ms, hangover_ms)
 MODE_CUSTOM_PARAMS = {
     fast_vad.mode.permissive: (0.6199999469, 64, 384, 192),
-    fast_vad.mode.normal:     (0.7200000789, 64, 256, 64),
+    fast_vad.mode.normal: (0.7200000789, 64, 256, 64),
     fast_vad.mode.aggressive: (0.7699999635, 128, 192, 64),
 }
 
@@ -25,6 +25,7 @@ def make_audio(length: int, seed: int = 0) -> np.ndarray:
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="module")
 def vad_16k():
@@ -38,6 +39,7 @@ def vad_8k():
 
 # ── mode namespace ────────────────────────────────────────────────────────────
 
+
 def test_mode_namespace_values():
     assert fast_vad.mode.permissive == 0
     assert fast_vad.mode.normal == 1
@@ -45,27 +47,34 @@ def test_mode_namespace_values():
 
 
 def test_module_version_matches_pyproject():
-    project_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+    project_version = tomllib.loads(Path("pyproject.toml").read_text())["project"][
+        "version"
+    ]
     assert fast_vad.__version__ == project_version
 
 
 # ── Error handling: bad sample rate ───────────────────────────────────────────
 
-@pytest.mark.parametrize("cls_factory", [
-    lambda sr: fast_vad.VAD(sr),
-    lambda sr: fast_vad.VAD.with_mode(sr, fast_vad.mode.normal),
-    lambda sr: fast_vad.VAD.with_config(sr, 0.7, 64, 256, 64),
-    lambda sr: fast_vad.VadStateful(sr),
-    lambda sr: fast_vad.VadStateful.with_mode(sr, fast_vad.mode.normal),
-    lambda sr: fast_vad.VadStateful.with_config(sr, 0.7, 64, 256, 64),
-    lambda sr: fast_vad.FeatureExtractor(sr),
-])
+
+@pytest.mark.parametrize(
+    "cls_factory",
+    [
+        lambda sr: fast_vad.VAD(sr),
+        lambda sr: fast_vad.VAD.with_mode(sr, fast_vad.mode.normal),
+        lambda sr: fast_vad.VAD.with_config(sr, 0.7, 64, 256, 64),
+        lambda sr: fast_vad.VadStateful(sr),
+        lambda sr: fast_vad.VadStateful.with_mode(sr, fast_vad.mode.normal),
+        lambda sr: fast_vad.VadStateful.with_config(sr, 0.7, 64, 256, 64),
+        lambda sr: fast_vad.FeatureExtractor(sr),
+    ],
+)
 def test_unsupported_sample_rate_raises(cls_factory):
     with pytest.raises(ValueError, match="Unsupported sample rate"):
         cls_factory(44100)
 
 
 # ── Error handling: bad mode ───────────────────────────────────────────────────
+
 
 def test_vad_with_mode_invalid_mode_raises():
     with pytest.raises(ValueError, match="Unsupported mode"):
@@ -84,6 +93,7 @@ def test_mode_rejects_string_raises():
 
 # ── Error handling: wrong frame length ────────────────────────────────────────
 
+
 def test_stateful_detect_frame_wrong_length_raises():
     vad = fast_vad.VadStateful(SAMPLE_RATE_16K)
     with pytest.raises(ValueError, match="Invalid frame length"):
@@ -97,6 +107,7 @@ def test_stateful_detect_frame_empty_raises():
 
 
 # ── detect output shape and type ──────────────────────────────────────────────
+
 
 def test_detect_returns_numpy_array_of_bools(vad_16k):
     audio = make_audio(FRAME_SIZE_16K * 2)
@@ -131,6 +142,7 @@ def test_detect_segments_empty_audio_returns_empty_array(vad_16k):
 
 
 # ── detect correctness ────────────────────────────────────────────────────────
+
 
 def test_detect_sample_labels_carry_tail_from_last_frame(vad_16k):
     audio = make_audio(FRAME_SIZE_16K * 3 + 37, seed=1)
@@ -189,41 +201,57 @@ def test_detect_segments_values_are_valid_indices(vad_16k):
 
 # ── with_config matches with_mode ─────────────────────────────────────────────
 
-@pytest.mark.parametrize("mode", [
-    fast_vad.mode.permissive,
-    fast_vad.mode.normal,
-    fast_vad.mode.aggressive,
-])
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        fast_vad.mode.permissive,
+        fast_vad.mode.normal,
+        fast_vad.mode.aggressive,
+    ],
+)
 def test_with_config_matches_with_mode_16k(mode):
     audio = make_audio(FRAME_SIZE_16K * 8 + 23, seed=40 + mode)
     p, min_speech_ms, min_silence_ms, hangover_ms = MODE_CUSTOM_PARAMS[mode]
 
     vad_mode = fast_vad.VAD.with_mode(SAMPLE_RATE_16K, mode)
-    vad_cfg = fast_vad.VAD.with_config(SAMPLE_RATE_16K, p, min_speech_ms, min_silence_ms, hangover_ms)
+    vad_cfg = fast_vad.VAD.with_config(
+        SAMPLE_RATE_16K, p, min_speech_ms, min_silence_ms, hangover_ms
+    )
 
     assert np.array_equal(vad_mode.detect_frames(audio), vad_cfg.detect_frames(audio))
     assert np.array_equal(vad_mode.detect(audio), vad_cfg.detect(audio))
-    assert np.array_equal(vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio))
+    assert np.array_equal(
+        vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio)
+    )
 
 
-@pytest.mark.parametrize("mode", [
-    fast_vad.mode.permissive,
-    fast_vad.mode.normal,
-    fast_vad.mode.aggressive,
-])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        fast_vad.mode.permissive,
+        fast_vad.mode.normal,
+        fast_vad.mode.aggressive,
+    ],
+)
 def test_with_config_matches_with_mode_8k(mode):
     audio = make_audio(FRAME_SIZE_8K * 10 + 17, seed=77 + mode)
     p, min_speech_ms, min_silence_ms, hangover_ms = MODE_CUSTOM_PARAMS[mode]
 
     vad_mode = fast_vad.VAD.with_mode(SAMPLE_RATE_8K, mode)
-    vad_cfg = fast_vad.VAD.with_config(SAMPLE_RATE_8K, p, min_speech_ms, min_silence_ms, hangover_ms)
+    vad_cfg = fast_vad.VAD.with_config(
+        SAMPLE_RATE_8K, p, min_speech_ms, min_silence_ms, hangover_ms
+    )
 
     assert np.array_equal(vad_mode.detect_frames(audio), vad_cfg.detect_frames(audio))
     assert np.array_equal(vad_mode.detect(audio), vad_cfg.detect(audio))
-    assert np.array_equal(vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio))
+    assert np.array_equal(
+        vad_mode.detect_segments(audio), vad_cfg.detect_segments(audio)
+    )
 
 
 # ── VadStateful ───────────────────────────────────────────────────────────────
+
 
 def test_stateful_frame_size_matches_expected():
     assert fast_vad.VadStateful(SAMPLE_RATE_16K).frame_size == FRAME_SIZE_16K
@@ -251,10 +279,39 @@ def test_stateful_with_config_matches_with_mode():
     )
 
     frames = [make_audio(FRAME_SIZE_16K, seed=100 + i) for i in range(8)]
-    assert [vad_mode.detect_frame(f) for f in frames] == [vad_cfg.detect_frame(f) for f in frames]
+    assert [vad_mode.detect_frame(f) for f in frames] == [
+        vad_cfg.detect_frame(f) for f in frames
+    ]
+
+
+# ── Wrong dtype raises clear TypeError ────────────────────────────────────────
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.int16, np.int32])
+@pytest.mark.parametrize(
+    "method,make_input",
+    [
+        ("detect", lambda: np.zeros(FRAME_SIZE_16K * 2)),
+        ("detect_frames", lambda: np.zeros(FRAME_SIZE_16K * 2)),
+        ("detect_segments", lambda: np.zeros(FRAME_SIZE_16K * 2)),
+    ],
+)
+def test_vad_wrong_dtype_raises_type_error(vad_16k, method, make_input, dtype):
+    audio = make_input().astype(dtype)
+    with pytest.raises(TypeError, match="float32"):
+        getattr(vad_16k, method)(audio)
+
+
+@pytest.mark.parametrize("dtype", [np.float64, np.int16, np.int32])
+def test_stateful_detect_frame_wrong_dtype_raises_type_error(dtype):
+    vad = fast_vad.VadStateful(SAMPLE_RATE_16K)
+    frame = np.zeros(FRAME_SIZE_16K).astype(dtype)
+    with pytest.raises(TypeError, match="float32"):
+        vad.detect_frame(frame)
 
 
 # ── FeatureExtractor ──────────────────────────────────────────────────────────
+
 
 def test_feature_extractor_output_shape():
     fe = fast_vad.FeatureExtractor(SAMPLE_RATE_16K)

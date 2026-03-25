@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-25
+
+### Added
+
+- `FeatureExtractor.feature_engineer()`: returns a `(num_frames, 24)` float32 array of log-energy features plus first and second-order deltas.
+
+### Changed
+
+- Passing a numpy array with the wrong dtype now raises a clear `TypeError` (e.g. `expected a numpy array with dtype float32, but got dtype float64`) instead of an opaque PyO3 type error.
+
 ## [0.2.0] - 2026-03-21
 
 ### Added

@@ -23,8 +23,11 @@
 //! ```
 
 use ndarray::Array2;
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1};
-use pyo3::exceptions::PyValueError;
+use numpy::{
+    PyArray1, PyArray2, PyArrayDescrMethods, PyArrayMethods, PyReadonlyArray1,
+    PyUntypedArrayMethods,
+};
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyModule, PyType};
 use realfft::num_complex::Complex32;
@@ -35,6 +38,21 @@ pub mod vad;
 pub use vad::VadError;
 pub use vad::detector::{VAD, VADModes, VadConfig, VadStateful};
 pub use vad::filterbank::FilterBank;
+
+fn as_f32_array1<'py>(obj: &Bound<'py, PyAny>) -> PyResult<PyReadonlyArray1<'py, f32>> {
+    if let Ok(untyped) = obj.cast::<numpy::PyUntypedArray>() {
+        let dtype = untyped.dtype();
+        if !dtype.is_equiv_to(&numpy::dtype::<f32>(obj.py())) {
+            return Err(PyErr::new::<PyTypeError, _>(format!(
+                "expected a numpy array with dtype float32, but got dtype {}",
+                dtype
+            )));
+        }
+    }
+    obj.cast::<numpy::PyArray1<f32>>()
+        .map_err(PyErr::from)
+        .and_then(|arr| arr.try_readonly().map_err(PyErr::from))
+}
 
 fn map_vad_error(err: vad::VadError) -> PyErr {
     match err {
@@ -133,8 +151,9 @@ impl FeatureExtractor {
     fn extract_features_frame<'py>(
         &mut self,
         py: Python<'py>,
-        frame: PyReadonlyArray1<'py, f32>,
+        frame: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let frame = as_f32_array1(&frame)?;
         let frame = frame.as_slice()?;
         let energies = py
             .detach(|| {
@@ -156,8 +175,9 @@ impl FeatureExtractor {
     fn extract_features<'py>(
         &self,
         py: Python<'py>,
-        audio: PyReadonlyArray1<'py, f32>,
+        audio: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        let audio = as_f32_array1(&audio)?;
         let audio = audio.as_slice()?;
         let features = py.detach(|| self.feature_extractor.compute_filterbank(audio));
         let num_frames = features.len();
@@ -167,6 +187,28 @@ impl FeatureExtractor {
             arr.row_mut(i).assign(&ndarray::ArrayView1::from(
                 &frame.to_array() as &[f32; vad::constants::NUM_BANDS]
             ));
+        }
+        Ok(PyArray2::from_owned_array(py, arr))
+    }
+
+    /// Computes 24-dimensional features for each frame in `audio`.
+    ///
+    /// Each row contains 8 log-energy values, 8 first-order deltas, and 8 second-order deltas.
+    /// Returns a `(num_frames, 24)` float32 array. Trailing samples that do not
+    /// fill a complete frame are discarded.
+    fn feature_engineer<'py>(
+        &self,
+        py: Python<'py>,
+        audio: Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        let audio = as_f32_array1(&audio)?;
+        let audio = audio.as_slice()?;
+        let features = py.detach(|| self.feature_extractor.feature_engineer(audio));
+        let num_frames = features.len();
+        let mut arr = Array2::<f32>::zeros((num_frames, 24));
+        for (i, frame) in features.iter().enumerate() {
+            arr.row_mut(i)
+                .assign(&ndarray::ArrayView1::from(frame as &[f32; 24]));
         }
         Ok(PyArray2::from_owned_array(py, arr))
     }
@@ -241,8 +283,9 @@ impl PyVAD {
     fn detect<'py>(
         &self,
         py: Python<'py>,
-        audio: PyReadonlyArray1<'py, f32>,
+        audio: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<bool>>> {
+        let audio = as_f32_array1(&audio)?;
         let audio = audio.as_slice()?;
         let labels = py.detach(|| self.vad.detect(audio));
         Ok(PyArray1::from_vec(py, labels))
@@ -252,8 +295,9 @@ impl PyVAD {
     fn detect_frames<'py>(
         &self,
         py: Python<'py>,
-        audio: PyReadonlyArray1<'py, f32>,
+        audio: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyArray1<bool>>> {
+        let audio = as_f32_array1(&audio)?;
         let audio = audio.as_slice()?;
         let labels = py.detach(|| self.vad.detect_frames(audio));
         Ok(PyArray1::from_vec(py, labels))
@@ -263,8 +307,9 @@ impl PyVAD {
     fn detect_segments<'py>(
         &self,
         py: Python<'py>,
-        audio: PyReadonlyArray1<'py, f32>,
+        audio: Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyArray2<u64>>> {
+        let audio = as_f32_array1(&audio)?;
         let audio = audio.as_slice()?;
         let segments = py.detach(|| self.vad.detect_segments(audio));
         Ok(segments_to_array(py, segments))
@@ -352,11 +397,8 @@ impl PyVadStateful {
     /// Processes one frame and returns whether speech is active.
     ///
     /// `frame` must contain exactly `frame_size` samples.
-    fn detect_frame<'py>(
-        &mut self,
-        py: Python<'py>,
-        frame: PyReadonlyArray1<'py, f32>,
-    ) -> PyResult<bool> {
+    fn detect_frame<'py>(&mut self, py: Python<'py>, frame: Bound<'py, PyAny>) -> PyResult<bool> {
+        let frame = as_f32_array1(&frame)?;
         let frame = frame.as_slice()?;
         py.detach(|| self.vad.detect_frame(frame))
             .map_err(map_vad_error)

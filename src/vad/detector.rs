@@ -286,80 +286,6 @@ fn frame_labels_to_segments(
     segments
 }
 
-#[derive(Debug, Clone)]
-struct OnlineSmoother {
-    config: DetectionConfig,
-    in_speech: bool,
-    speech_run: usize,
-    silence_run: usize,
-    hangover_left: usize,
-}
-
-impl OnlineSmoother {
-    fn new(config: DetectionConfig) -> Self {
-        Self {
-            config,
-            in_speech: false,
-            speech_run: 0,
-            silence_run: 0,
-            hangover_left: 0,
-        }
-    }
-
-    fn apply(&mut self, raw_is_speech: bool) -> bool {
-        if raw_is_speech {
-            self.speech_run += 1;
-            self.silence_run = 0;
-            self.hangover_left = self.config.hangover_frames;
-
-            if !self.in_speech && self.speech_run >= self.config.min_speech_frames {
-                self.in_speech = true;
-            }
-
-            return self.in_speech;
-        }
-
-        self.speech_run = 0;
-
-        if !self.in_speech {
-            self.silence_run += 1;
-            self.hangover_left = 0;
-            return false;
-        }
-
-        self.silence_run += 1;
-
-        if self.silence_run < self.config.min_silence_frames {
-            return true;
-        }
-
-        if self.hangover_left > 0 {
-            self.hangover_left -= 1;
-            return true;
-        }
-
-        self.in_speech = false;
-        self.silence_run = 0;
-        false
-    }
-
-    fn reset(&mut self) {
-        self.in_speech = false;
-        self.speech_run = 0;
-        self.silence_run = 0;
-        self.hangover_left = 0;
-    }
-}
-
-#[cfg(test)]
-fn apply_online_smoothing(raw_labels: &[bool], config: DetectionConfig) -> Vec<bool> {
-    let mut smoother = OnlineSmoother::new(config);
-    raw_labels
-        .iter()
-        .map(|&label| smoother.apply(label))
-        .collect()
-}
-
 /// Batch voice activity detector.
 ///
 /// Processes a complete audio buffer and returns per-sample or per-frame labels.
@@ -512,6 +438,71 @@ impl fmt::Display for VAD {
             )
             .field("hangover_ms", &format_args!("{} ms", self.hangover_ms()))
             .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OnlineSmoother {
+    config: DetectionConfig,
+    in_speech: bool,
+    speech_run: usize,
+    silence_run: usize,
+    hangover_left: usize,
+}
+
+impl OnlineSmoother {
+    fn new(config: DetectionConfig) -> Self {
+        Self {
+            config,
+            in_speech: false,
+            speech_run: 0,
+            silence_run: 0,
+            hangover_left: 0,
+        }
+    }
+
+    fn apply(&mut self, raw_is_speech: bool) -> bool {
+        if raw_is_speech {
+            self.speech_run += 1;
+            self.silence_run = 0;
+            self.hangover_left = self.config.hangover_frames;
+
+            if !self.in_speech && self.speech_run >= self.config.min_speech_frames {
+                self.in_speech = true;
+            }
+
+            return self.in_speech;
+        }
+
+        self.speech_run = 0;
+
+        if !self.in_speech {
+            self.silence_run += 1;
+            self.hangover_left = 0;
+            return false;
+        }
+
+        self.silence_run += 1;
+
+        if self.silence_run < self.config.min_silence_frames {
+            return true;
+        }
+
+        if self.hangover_left > 0 {
+            self.hangover_left -= 1;
+            return true;
+        }
+
+        self.in_speech = false;
+        self.silence_run = 0;
+        false
+    }
+
+    fn reset(&mut self) {
+        self.in_speech = false;
+        self.speech_run = 0;
+        self.silence_run = 0;
+        self.hangover_left = 0;
     }
 }
 
@@ -673,6 +664,15 @@ impl fmt::Display for VadStateful {
             .field("hangover_ms", &format_args!("{} ms", self.hangover_ms()))
             .finish()
     }
+}
+
+#[cfg(test)]
+fn apply_online_smoothing(raw_labels: &[bool], config: DetectionConfig) -> Vec<bool> {
+    let mut smoother = OnlineSmoother::new(config);
+    raw_labels
+        .iter()
+        .map(|&label| smoother.apply(label))
+        .collect()
 }
 
 #[cfg(test)]

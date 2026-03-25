@@ -3,11 +3,16 @@
 Extremely fast voice activity detection in Rust with Python bindings and streaming mode support. Significantly faster than WebRTC VAD and orders of magnitude faster than Silero ONNX. See [benchmark comparisons](docs/README.md).
 
 Supports 16 kHz and 8 kHz sample rates.
-## Benchmarking
 
-```bash
-cargo bench --manifest-path bench_rs/Cargo.toml
-```
+## Architecture
+
+Audio is split into non-overlapping 32 ms frames (512 samples at 16 kHz, 256 at 8 kHz), Hann-windowed, FFT'd, and collapsed into 8 log-energy bands covering roughly 94-4000 Hz.
+
+Per frame, the detector builds 32 features: 8 raw log-energies, 8 noise-normalised values (raw minus a running noise floor), and their first and second order deltas. A logistic regression model with weights compiled into the crate scores these features and compares the result to a mode-specific threshold. The noise floor is a per-band exponential moving average that only updates on silence frames, so it adapts to background noise without being contaminated by speech.
+
+Raw frame labels are then post-processed: short speech bursts below `min_speech_ms` are dropped, short silence gaps below `min_silence_ms` are filled, and voiced regions are extended by `hangover_ms` to avoid clipping word endings.
+
+`VAD` processes all frames in parallel with `rayon`. `VadStateful` processes one frame at a time with reused FFT scratch buffers for low-latency streaming. Hot loops are SIMD-accelerated via the `wide` crate.
 
 ## Install
 
@@ -29,24 +34,16 @@ uv add fast-vad
 cargo add fast-vad
 ```
 
-## Architecture
-
-Audio is split into 32 ms frames, windowed, FFT'd, and collapsed into 8 log-energy bands. The detector tracks a running noise floor and builds 32 features per frame from the raw band energies, noise-normalized energies, and their first and second order deltas. A small logistic regression model with weights compiled into the crate scores each frame, and a few temporal smoothing rules handle minimum speech and silence durations before producing the final labels.
-
-`VAD` runs all frames in parallel using `rayon`. `VadStateful` processes one frame at a time with reused scratch buffers for low-latency streaming. Hot loops are SIMD-accelerated via the `wide` crate.
-
 ## Build from source
 
-### Python (with uv)
+### Python
 
-Requires [uv](https://docs.astral.sh/uv/) and a Rust toolchain.
+Requires a Rust toolchain and [maturin](https://github.com/PyO3/maturin).
 
 ```bash
 git clone https://github.com/AtharvBhat/fast-vad
 cd fast-vad
-uv venv
-uv tool install maturin
-uv run maturin develop --release
+maturin develop --release
 ```
 
 ### Rust
@@ -117,11 +114,16 @@ vad.reset_state()  # reuse for another stream
 
 ### Feature extraction
 
-You can also use fast vad as s feature extractor. This will return a 8 log energy band features per frame.
+You can also use fast vad as a feature extractor.
 
 ```python
 fe = fast_vad.FeatureExtractor(sr)
+
+# 8 log-energy band features per frame
 features = fe.extract_features(audio)  # shape: (num_frames, 8)
+
+# 24-dimensional features per frame: raw bands + first- and second-order deltas
+features = fe.feature_engineer(audio)  # shape: (num_frames, 24)
 ```
 
 ### Modes
@@ -131,6 +133,8 @@ features = fe.extract_features(audio)  # shape: (num_frames, 8)
 | `fast_vad.mode.permissive` | Low false-negative rate; more speech accepted |
 | `fast_vad.mode.normal`     | Balanced, general-purpose                     |
 | `fast_vad.mode.aggressive` | Low false-positive rate; stricter             |
+
+The built-in modes were tuned against LibriVAD, so they work best on read speech. For other domains (phone calls, meetings, noisy environments, etc.) you'll likely get better results tuning `with_config()` against your own data.
 
 ## Rust usage
 
@@ -196,6 +200,12 @@ fn main() -> Result<(), fast_vad::VadError> {
     vad.reset_state(); // reuse for another stream
     Ok(())
 }
+```
+
+## Benchmarking
+
+```bash
+cargo bench --manifest-path bench_rs/Cargo.toml
 ```
 
 ## License

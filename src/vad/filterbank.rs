@@ -124,6 +124,29 @@ impl FilterBank {
             )
             .collect()
     }
+
+    /// Computes 24-dimensional features for each frame, suitable for feeding into another downstream model.
+    /// This only computes the 8 log-energy features, first and second order features
+    /// Noise floor features are excluded as those need the logistic regression model to update the noise floor estimate.
+    pub fn feature_engineer(&self, input: &[f32]) -> Vec<[f32; 24]> {
+        let raw_features = self.compute_filterbank(input);
+        let mut prev = raw_features.first().copied().unwrap_or(f32x8::splat(0.0));
+        let mut prev_delta = f32x8::splat(0.0);
+
+        let mut features = vec![[0.0f32; 24]; raw_features.len()];
+
+        raw_features.iter().enumerate().for_each(|(i, raw)| {
+            let delta = *raw - prev;
+            let delta2 = delta - prev_delta;
+            features[i][0..8].copy_from_slice(&raw.to_array());
+            features[i][8..16].copy_from_slice(&delta.to_array());
+            features[i][16..24].copy_from_slice(&delta2.to_array());
+            prev = *raw;
+            prev_delta = delta;
+        });
+
+        features
+    }
 }
 
 fn compute_hann_window(size: usize) -> Vec<f32> {
@@ -565,6 +588,145 @@ mod tests {
             e0[2],
             e90[2]
         );
+    }
+
+    // --- feature_engineer tests ---
+
+    #[test]
+    fn feature_engineer_empty_input_returns_empty() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let result = fb.feature_engineer(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn feature_engineer_output_length_matches_frame_count() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let audio: Vec<f32> = (0..FRAME_SIZE * 5)
+            .map(|i| i as f32 / FRAME_SIZE as f32)
+            .collect();
+        let result = fb.feature_engineer(&audio);
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn feature_engineer_first_frame_delta_is_zero() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let result = fb.feature_engineer(&sine_frame(500.0, 0.5));
+        let delta = &result[0][8..16];
+        let delta2 = &result[0][16..24];
+        assert!(
+            delta.iter().all(|&v| v == 0.0),
+            "frame 0 delta should be zero, got {delta:?}"
+        );
+        assert!(
+            delta2.iter().all(|&v| v == 0.0),
+            "frame 0 delta2 should be zero, got {delta2:?}"
+        );
+    }
+
+    #[test]
+    fn feature_engineer_raw_matches_filterbank() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let mut audio = Vec::new();
+        audio.extend(sine_frame(500.0, 0.5));
+        audio.extend(sine_frame(1000.0, 0.3));
+        audio.extend(silence_frame());
+
+        let features = fb.feature_engineer(&audio);
+        let raw = fb.compute_filterbank(&audio);
+
+        for (i, (feat, raw_frame)) in features.iter().zip(raw.iter()).enumerate() {
+            let raw_arr = raw_frame.to_array();
+            assert_eq!(&feat[0..8], &raw_arr, "frame {i}: raw features mismatch");
+        }
+    }
+
+    #[test]
+    fn feature_engineer_delta_is_current_minus_previous() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let mut audio = Vec::new();
+        audio.extend(sine_frame(300.0, 0.4));
+        audio.extend(sine_frame(1500.0, 0.6));
+        audio.extend(sine_frame(800.0, 0.3));
+
+        let features = fb.feature_engineer(&audio);
+        let raw = fb.compute_filterbank(&audio);
+
+        for i in 1..features.len() {
+            let expected_delta: Vec<f32> = raw[i]
+                .to_array()
+                .iter()
+                .zip(raw[i - 1].to_array().iter())
+                .map(|(a, b)| a - b)
+                .collect();
+            assert_eq!(
+                &features[i][8..16],
+                expected_delta.as_slice(),
+                "frame {i}: delta mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn feature_engineer_delta2_is_delta_minus_previous_delta() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let mut audio = Vec::new();
+        audio.extend(sine_frame(300.0, 0.4));
+        audio.extend(sine_frame(1500.0, 0.6));
+        audio.extend(sine_frame(800.0, 0.3));
+
+        let features = fb.feature_engineer(&audio);
+
+        for i in 1..features.len() {
+            let expected_delta2: Vec<f32> = features[i][8..16]
+                .iter()
+                .zip(features[i - 1][8..16].iter())
+                .map(|(d, pd)| d - pd)
+                .collect();
+            assert_eq!(
+                &features[i][16..24],
+                expected_delta2.as_slice(),
+                "frame {i}: delta2 mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn feature_engineer_constant_signal_deltas_zero() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        // Same frame repeated → delta should be 0 for all frames after the first
+        let frame = sine_frame(440.0, 0.5);
+        let audio: Vec<f32> = frame.iter().cloned().cycle().take(FRAME_SIZE * 4).collect();
+
+        let features = fb.feature_engineer(&audio);
+
+        for i in 1..features.len() {
+            let delta = &features[i][8..16];
+            for (band, &v) in delta.iter().enumerate() {
+                assert!(
+                    v.abs() < 1e-4,
+                    "frame {i} band {band}: delta should be ~0 for constant signal, got {v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn feature_engineer_all_values_finite() {
+        let fb = FilterBank::new(SAMPLE_RATE).unwrap();
+        let mut audio = Vec::new();
+        audio.extend(silence_frame());
+        audio.extend(sine_frame(1000.0, 1.0));
+        audio.extend(sine_frame(200.0, 0.1));
+
+        let features = fb.feature_engineer(&audio);
+        for (i, feat) in features.iter().enumerate() {
+            assert!(
+                feat.iter().all(|v| v.is_finite()),
+                "frame {i} contains non-finite value: {feat:?}"
+            );
+        }
     }
 
     #[test]
