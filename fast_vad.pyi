@@ -54,6 +54,20 @@ class FeatureExtractor:
         """
         ...
 
+    def feature_engineer(self, audio: NDArray[np.float32]) -> NDArray[np.float32]:
+        """
+        Compute 24-dimensional features for each frame in audio.
+
+        Each row contains 8 log-energy values, 8 first-order deltas, and
+        8 second-order deltas.
+
+        Args:
+            audio: 1-D float32 array of audio samples.
+
+        Returns:
+            Float32 array of shape (num_frames, 24).
+        """
+        ...
 
 class mode:
     """Integer constants for VAD operating modes."""
@@ -65,10 +79,8 @@ class mode:
     aggressive: int
     """Low false-positive rate; stricter speech detection."""
 
-
 VADMode = int
 """Integer alias for a VAD mode. Use constants from :class:`mode`."""
-
 
 class VAD:
     """Batch voice activity detector.
@@ -162,7 +174,6 @@ class VAD:
             Array of shape (N, 2). Each row is [start_sample, end_sample].
         """
         ...
-
 
 class VadStateful:
     """Streaming VAD that processes one frame at a time.
